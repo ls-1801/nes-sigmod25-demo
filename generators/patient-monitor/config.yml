@@ -1,0 +1,48 @@
+ecg:
+  broker: localhost
+  port: 1883
+  topic: source/live/patient_monitor_ecg
+  period: 10 # milliseconds between publishes
+abp:
+  broker: localhost
+  port: 1883
+  topic: source/live/patient_monitor_abp
+  period: 10 # milliseconds between publishes
+ppg:
+  broker: localhost
+  port: 1883
+  topic: source/live/patient_monitor_ppg
+  period: 10 # milliseconds between publishes
+spo2_ards:
+  broker: localhost
+  port: 1883
+  topic: source/live/patient_monitor_abp_values
+  period: 1 # seconds between publishes
+  start_epoch: 1750356392939831000   # timestamp (in microseconds) at which the generation starts
+  full_cycle_duration: 96 # in seconds
+  values: [ 100, 95 ] # normal and sick state
+  init_phase_duration: 30 # seconds time for how long the normal value will be held until the phase-over starts
+  phase_over_duration: 30 # seconds time for linear change from normal to sick state
+  variation: 1
+hr_hpss:
+  broker: localhost
+  port: 1883
+  topic: source/live/patient_monitor_ecg_values
+  period: 1 # seconds between publishes
+  start_epoch: 1750356392939831000 # timestamp (in microseconds) at which the generation starts
+  full_cycle_duration: 96 # in seconds
+  values: [ 80, 98 ] # normal and sick state
+  init_phase_duration: 30 # seconds time for how long the normal value will be held until the phase-over starts
+  phase_over_duration: 30 # seconds time for linear change from normal to sick state
+  variation: 1
+sbp_hpss:
+  broker: localhost
+  port: 1883
+  topic: source/live/patient_monitor_ppg_values
+  period: 0.6 # seconds between publishes
+  start_epoch: 1750356392939831000 # timestamp (in microseconds) at which the generation starts
+  full_cycle_duration: 96 # in seconds
+  values: [ 120, 95 ] # normal and sick state
+  init_phase_duration: 30 # seconds time for how long the normal value will be held until the phase-over starts
+  phase_over_duration: 30 # seconds time for linear change from normal to sick state
+  variation: 2

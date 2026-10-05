@@ -1,0 +1,8 @@
+# Local builds of the replayed-sensor images (the UI image comes from the SIGMOD UI repository, the worker and CLI images
+# from the NebulaStream build). Use together with compose.yaml:
+#   docker compose -f compose.yaml -f compose.build.yaml up --build
+services:
+  patient-monitor:
+    build: generators/patient-monitor
+  lab-values:
+    build: generators/lab-values

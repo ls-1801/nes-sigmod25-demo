@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+# written by the worker and the CLI into their working directory (the repository is mounted there)
+*.log

@@ -1,0 +1,105 @@
+# SIGMOD demo in one compose file:
+#
+#   NES_DOCKER_TAG=<tag> docker compose up
+#
+# It starts the worker, the MQTT broker, the web UI, the replayed patient-monitor and lab-value generators, and a
+# `queries` service that waits for the worker, starts all queries of topology.yaml, reports the ones that fail, and
+# stops them again when the project is stopped. Stop it with Ctrl-C, or `docker compose down` from another shell.
+#
+# The images are pulled, not built: ${NES_IMAGE_REPO:-nebulastream}/{nes-worker,nes-cli,sigmod-ui,sigmod-patient-monitor,
+# sigmod-lab-values}:${NES_DOCKER_TAG:-local}. For a local build of the generators add the override file:
+#   docker compose -f compose.yaml -f compose.build.yaml up --build
+# (the nes-worker and nes-cli images come from the NebulaStream build: `cmake --build <dir> --target package-docker-nes-worker
+# package-docker-nes-cli`, with NES_DOCKER_TAG set).
+#
+# Everything uses the host network: the camera is reached through the host's GigE interface, the UI talks to the broker
+# on localhost, and queries address the worker as localhost:8080. Ports: worker 8080 (gRPC) and 9090 (data), MQTT 1883,
+# MQTT over WebSocket 9001, UI 3000. This needs a rootful Docker (rootless Docker's host network has no NICs).
+#
+# Variables: NES_DOCKER_TAG, NES_IMAGE_REPO, NES_ALSA_DEVICE (ALSA capture device in the worker, see `arecord -l`),
+# NES_AUDIO_GID, NES_WORKER_MEMORY_BYTES, NES_DEMO_FAIL_FAST, NES_DEMO_TOPOLOGY.
+name: sigmod
+
+services:
+  worker:
+    image: ${NES_IMAGE_REPO:-nebulastream}/nes-worker:${NES_DOCKER_TAG:-local}
+    network_mode: host
+    working_dir: /nebulastream
+    volumes:
+      - .:/nebulastream
+      - ./asound.conf:/etc/asound.conf:ro
+    devices:
+      - /dev/snd:/dev/snd
+    group_add:
+      - ${NES_AUDIO_GID:-audio}
+    # Aravis (GigE Vision) receives the camera stream through a raw packet socket whenever it is allowed to open one, and
+    # that socket is bound to the interface found by the host's IP address. That picks the wrong interface when several
+    # NICs share an address, and the stream never arrives. Without CAP_NET_RAW it uses a normal UDP socket, which follows
+    # the routing table.
+    cap_drop:
+      - NET_RAW
+    environment:
+      NES_UDF_PATH: /nebulastream/python_udfs
+      NES_ALSA_DEVICE: ${NES_ALSA_DEVICE:-plughw:0,0}
+    command:
+      - --
+      - --worker.total_memory_in_bytes=${NES_WORKER_MEMORY_BYTES:-8589934592}
+    healthcheck:
+      test: ["CMD", "/bin/grpc_health_probe", "-addr=localhost:8080", "-connect-timeout", "2s"]
+      interval: 2s
+      timeout: 4s
+      retries: 30
+      start_period: 5s
+    restart: on-failure
+
+  # Starts and watches the queries; see queries.sh. The queries are stopped when this container is stopped, which
+  # happens before the worker stops because it depends on it. A failed run (worker lost) restarts the container.
+  queries:
+    image: ${NES_IMAGE_REPO:-nebulastream}/nes-cli:${NES_DOCKER_TAG:-local}
+    network_mode: host
+    working_dir: /nebulastream
+    entrypoint: ["/nebulastream/queries.sh"]
+    volumes:
+      - .:/nebulastream
+      - queries-state:/state
+    environment:
+      XDG_STATE_HOME: /state
+      NES_CLI: /usr/bin/nes-cli
+      NES_DEMO_TOPOLOGY: ${NES_DEMO_TOPOLOGY:-topology.yaml}
+      NES_DEMO_FAIL_FAST: ${NES_DEMO_FAIL_FAST:-0}
+    depends_on:
+      worker:
+        condition: service_healthy
+    stop_grace_period: 60s
+    restart: on-failure
+
+  mqtt:
+    image: eclipse-mosquitto:2
+    network_mode: host
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
+
+  webui:
+    image: ${NES_IMAGE_REPO:-nebulastream}/sigmod-ui:${NES_DOCKER_TAG:-local}
+    network_mode: host
+    restart: unless-stopped
+
+  # Replayed sensors: one "timestamp,value" CSV line per MQTT message on source/live/*
+  patient-monitor:
+    image: ${NES_IMAGE_REPO:-nebulastream}/sigmod-patient-monitor:${NES_DOCKER_TAG:-local}
+    network_mode: host
+    init: true
+    stop_grace_period: 3s
+    restart: on-failure
+
+  lab-values:
+    image: ${NES_IMAGE_REPO:-nebulastream}/sigmod-lab-values:${NES_DOCKER_TAG:-local}
+    network_mode: host
+    init: true
+    stop_grace_period: 3s
+    restart: on-failure
+
+volumes:
+  # The CLI remembers the started queries here, so that a restarted `queries` container can stop leftovers.
+  queries-state:

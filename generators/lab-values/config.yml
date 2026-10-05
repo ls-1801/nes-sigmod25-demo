@@ -1,0 +1,20 @@
+hco3:
+  broker: localhost
+  port: 1883
+  topic: source/live/lab_values
+  period: 10 # seconds between publishes
+natriumBG:
+  broker: localhost
+  port: 1883
+  topic: source/live/lab_values
+  period: 12 # seconds between publishes
+pco2:
+  broker: localhost
+  port: 1883
+  topic: source/live/lab_values
+  period: 15 # seconds between publishes
+ph:
+  broker: localhost
+  port: 1883
+  topic: source/live/lab_values
+  period: 7 # seconds between publishes
