@@ -9,7 +9,7 @@ git clone https://github.com/ls-1801/nes-sigmod25-demo && cd nes-sigmod25-demo
 NES_DOCKER_TAG=<tag> NES_ALSA_DEVICE=plughw:1,0 docker compose up
 ```
 
-then open <http://localhost:3000>. Ctrl-C (or `docker compose stop`) stops the queries first, then the worker; `docker compose down`
+then open <http://localhost:3000>. To run without the web UI (for example when it runs elsewhere): `docker compose --profile headless up`. Ctrl-C (or `docker compose stop`) stops the queries first, then the worker; `docker compose down`
 removes the containers.
 
 | service | |
@@ -17,7 +17,7 @@ removes the containers.
 | `worker` | `nes-worker`, with the camera (host network) and the microphone (`/dev/snd`) |
 | `queries` | `nes-cli` running `queries.sh`: waits for the worker, starts all queries of `topology.yaml`, reports queries that fail (`QUERY <name> is Failed: <error>`), stops them on shutdown |
 | `mqtt` | Mosquitto, MQTT on 1883 and WebSocket on 9001 |
-| `webui` | the SIGMOD UI on port 3000 |
+| `webui` | the SIGMOD UI on port 3000 (profile `ui`, on by default through `.env`; `--profile headless` leaves it out) |
 | `patient-monitor`, `lab-values` | replayed sensors publishing to `source/live/*` |
 
 ## Images

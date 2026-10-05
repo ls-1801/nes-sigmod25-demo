@@ -80,7 +80,10 @@ services:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     restart: unless-stopped
 
+  # Part of the `ui` profile, which .env turns on by default. Without the UI: `docker compose --profile headless up`
+  # (a profile without services of its own replaces the default one).
   webui:
+    profiles: [ui]
     image: ${NES_IMAGE_REPO:-nebulastream}/sigmod-ui:${NES_DOCKER_TAG:-local}
     network_mode: host
     restart: unless-stopped
