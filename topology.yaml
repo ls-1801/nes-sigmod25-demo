@@ -10,7 +10,7 @@
 #   video ──> video_frames ──> thermal_face (YuNet) ──> UI video (test/thermal-rgb-image)
 #                                  │
 #   pm_hr, pm_sysbp ──> vitals ────┴──> shock alert (alertType 5)
-#   microphone ──> audio_pipe ──> UI waveform, audio_window_pipe ──> audio_label_detection_pipe ──> speech alert (9)
+#   microphone ──> audio_pipe ──> UI waveform, audio_window_pipe ──> audio_label_detection_pipe ──> UI labels, speech alert (9)
 #   MQTT source/live/*  ──>  pass-through queries  ──>  MQTT sink/live/*
 #
 # Timestamps: video and audio sources deliver nanoseconds, the replayed monitor values microseconds. Everything that
@@ -148,12 +148,25 @@ query:
           )
           )
       INTO PIPE(audio_label_detection_pipe, "localhost:8080");
-  # Speech alert: class 9 of the keyword model ("go") heard clearly, at most once every two seconds.
+  # Every detection window of the keyword model (every 250 ms) for the UI: the recognized class and the audio level,
+  # which the audio panel shows over the last five seconds (also useful to see why speech_alert does not fire).
+  # The class index is the output position of the keyword model (models/kws_labels.csv); the UI names the classes.
+  - name: audio_labels_mqtt
+    # language=SQL
+    query: |
+      SELECT timestamp AS "timestamp", class_index AS "class_index", confidence AS "confidence", noise_level AS "noise_level"
+      FROM PIPE(audio_label_detection_pipe)
+      INTO MQTT('sink/live/audio_labels' AS "SINK"."TOPIC",
+                'localhost:8080' AS "SINK"."HOST",
+                'localhost:1883' AS "SINK"."SERVER_URI",
+                0 AS "SINK"."QOS",
+                'JSON' AS "SINK"."OUTPUT_FORMAT")
+  # Speech alert: class 9 of the keyword model ("go", see models/kws_labels.csv) heard clearly, at most once every two seconds.
   # The UI shows alertType 9 as "That was the word ...".
   - name: speech_alert
     # language=SQL
     query: |
-      SELECT UINT32(9) AS "alertType", start AS "timestamp", label AS "label", confidence AS "probability"
+      SELECT UINT32(9) AS "alertType", start AS "timestamp", class_index AS "class_index", confidence AS "probability"
       FROM (
           SELECT start, class_index, MAX(confidence) AS confidence
           FROM PIPE(audio_label_detection_pipe)
@@ -161,11 +174,6 @@ query:
           GROUP BY class_index
           WINDOW TUMBLING(timestamp, SIZE 2000000 MS)
           )
-          INNER JOIN TABLE (
-          SELECT label_index, label
-          FROM kws_labels
-          )
-      ON class_index = label_index
       INTO MQTT('sink/live/alert' AS "SINK"."TOPIC",
                 'localhost:8080' AS "SINK"."HOST",
                 'localhost:1883' AS "SINK"."SERVER_URI",
