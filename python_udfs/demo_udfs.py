@@ -163,7 +163,7 @@ def thermal_raw_stats(image, width, height):
 
 
 # Affine transform from thermal to RGB frame pixels (x' = a*x + b*y + c, y' = d*x + e*y + f), so that a face rectangle
-# found on the RGB frame covers the same spot on the aligned thermal frame. The two cameras sit side by side, so one
+# found on the aligned RGB frame (rgb_align_to_thermal) covers the same spot on the thermal frame. The two cameras sit side by side, so one
 # matrix is exact for one distance only (parallax); calibrate it at the distance of a face with
 # tools/thermal_calibration.py. The thermal camera sees a narrower field, so its frame covers the middle ~73% of the
 # RGB frame (scale 0.728, rotation -0.5 degrees; person at about 1 m, 2026-10-28).
@@ -171,14 +171,21 @@ THERMAL_TO_RGB = ((0.72810, -0.00635, 87.03),
                   (0.00635, 0.72810, 51.47))
 
 
-def thermal_align_to_rgb(image, width, height):
-    """16-bit thermal frame warped into the RGB camera's pixel grid (THERMAL_TO_RGB) -> 16-bit frame of the same size.
-    Pixels outside the thermal camera's view repeat the nearest border pixel."""
-    mono16 = np.frombuffer(image, dtype=np.uint16).reshape((int(height), int(width)))
+def rgb_align_to_thermal(image, width, height):
+    """YUYV frame warped into the thermal camera's pixel grid (the inverse of THERMAL_TO_RGB) -> BGR frame of the same
+    size. The thermal camera's view lies inside the RGB frame, so the result is the RGB frame cropped to that view and
+    scaled to the frame size, and the thermal frame keeps its own pixels."""
     m = np.array([[THERMAL_TO_RGB[0][0], THERMAL_TO_RGB[0][1], THERMAL_TO_RGB[0][2]],
                   [THERMAL_TO_RGB[1][0], THERMAL_TO_RGB[1][1], THERMAL_TO_RGB[1][2]]])
-    aligned = cv2.warpAffine(mono16, m, (int(width), int(height)), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    # flags: INTER_LINEAR | WARP_INVERSE_MAP, m maps the thermal (output) pixels to RGB (input) pixels
+    aligned = cv2.warpAffine(_yuyv_to_bgr(image, width, height), m, (int(width), int(height)), flags=17,
+                             borderMode=cv2.BORDER_REPLICATE)
     return str(aligned.data.as_byte(), int(aligned.nbytes))
+
+
+def bgr_to_jpg(image, width, height):
+    """BGR frame -> JPEG."""
+    return _encode_jpeg(np.frombuffer(image, dtype=np.uint8).reshape((int(height), int(width), 3)))
 
 
 def thermal_to_jpg(image, width, height):
@@ -203,7 +210,15 @@ YUNET_MIN_SCORE = 0.6
 
 def yunet_preprocess(image, width, height):
     """YUYV frame -> float32 BGR CHW tensor of the 320x320 YuNet input (raw 0..255 pixel values)."""
-    bgr = _yuyv_to_bgr(image, width, height)
+    return _yunet_tensor(_yuyv_to_bgr(image, width, height))
+
+
+def yunet_preprocess_bgr(image, width, height):
+    """BGR frame -> float32 BGR CHW tensor of the 320x320 YuNet input (raw 0..255 pixel values)."""
+    return _yunet_tensor(np.frombuffer(image, dtype=np.uint8).reshape((int(height), int(width), 3)))
+
+
+def _yunet_tensor(bgr):
     resized = cv2.resize(bgr, (YUNET_INPUT_SIZE, YUNET_INPUT_SIZE), interpolation=cv2.INTER_LINEAR)
     tensor = resized.astype(np.float32).transpose((2, 0, 1)).copy()
     return str(tensor.data.as_byte(), int(tensor.nbytes))

@@ -30,9 +30,11 @@ query:
   # Face detection on the latest RGB frame for every thermal frame (ASOF join), with the YuNet model: the frame is
   # resized to the 320x320 input tensor by a Python UDF, and a second UDF decodes the model output into the face
   # rectangle (x, y, width, height as four uint16 packed into a UINT64, in RGB frame pixels; 0 = no face).
+  # The RGB frame is warped into the thermal frame's pixel grid (rgb_align_to_thermal, a BGR frame of the thermal
+  # camera's view), so that the face rectangle found on it covers the face on the thermal frame.
   # With a face the output image is the thermal frame (INFERNO colour map, face outlined) and max_temp is the hottest
-  # pixel inside the rectangle in degrees Celsius. Without a face it is the RGB frame, and max_temp is 0, which the UI
-  # shows as "No face was detected".
+  # pixel inside the rectangle in degrees Celsius. Without a face it is the aligned RGB frame, and max_temp is 0, which
+  # the UI shows as "No face was detected".
   # PixelFormat values come from aravis: 17825799 = MONO16 (thermal), 34603058 = YUV_422_YUYV (RGB).
   - name: thermal_face
     # language=SQL
@@ -42,7 +44,7 @@ query:
                  WHEN face > UINT64(0) THEN
                      to_base64(thermal_to_jpg_with_rectangle(thermal_image, thermal_width, thermal_height, CASTTOTYPE(face AS UINT64)))
                  ELSE
-                     to_base64(yuyv_to_jpg(rgb_image, rgb_width, rgb_height))
+                     to_base64(bgr_to_jpg(rgb_image, rgb_width, rgb_height))
                  END AS image,
              CASE
                  WHEN face > UINT64(0) THEN
@@ -54,11 +56,12 @@ query:
             FROM MODEL_INFERENCE(
                 yunet, (
                 SELECT thermal_timestamp, thermal_image, thermal_width, thermal_height, rgb_image, rgb_width, rgb_height,
-                       CASTTOTYPE(yunet_preprocess(rgb_image, rgb_width, rgb_height) AS VARSIZED) AS tensor
+                       CASTTOTYPE(yunet_preprocess_bgr(rgb_image, rgb_width, rgb_height) AS VARSIZED) AS tensor
                 FROM (SELECT timestamp AS thermal_timestamp, image AS thermal_image, width AS thermal_width, height AS thermal_height
                       FROM PIPE(video_frames)
                       WHERE PIXEL_FORMAT = 17825799)
-                         ASOF JOIN (SELECT timestamp AS rgb_timestamp, image AS rgb_image, width AS rgb_width, height AS rgb_height
+                         ASOF JOIN (SELECT timestamp AS rgb_timestamp, rgb_align_to_thermal(image, width, height) AS rgb_image,
+                                           width AS rgb_width, height AS rgb_height
                                     FROM PIPE(video_frames)
                                     WHERE PIXEL_FORMAT = 34603058)
                          TIME(thermal_timestamp, rgb_timestamp)
@@ -373,6 +376,30 @@ functions:
       - { name: width, type: UINT64 }
       - { name: height, type: UINT64 }
     returns: UINT64
+  - name: rgb_align_to_thermal
+    bridge: codon
+    entrypoint: demo_udfs.rgb_align_to_thermal
+    args:
+      - { name: image, type: VARSIZED }
+      - { name: width, type: UINT64 }
+      - { name: height, type: UINT64 }
+    returns: VARSIZED
+  - name: bgr_to_jpg
+    bridge: codon
+    entrypoint: demo_udfs.bgr_to_jpg
+    args:
+      - { name: image, type: VARSIZED }
+      - { name: width, type: UINT64 }
+      - { name: height, type: UINT64 }
+    returns: VARSIZED
+  - name: yunet_preprocess_bgr
+    bridge: codon
+    entrypoint: demo_udfs.yunet_preprocess_bgr
+    args:
+      - { name: image, type: VARSIZED }
+      - { name: width, type: UINT64 }
+      - { name: height, type: UINT64 }
+    returns: VARSIZED
   - name: thermal_roi_max_celsius
     bridge: codon
     entrypoint: demo_udfs.thermal_roi_max_celsius
