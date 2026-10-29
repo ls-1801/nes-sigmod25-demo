@@ -1,20 +1,20 @@
 ecg:
-  broker: localhost
+  broker: mqtt
   port: 1883
   topic: source/live/patient_monitor_ecg
   period: 10 # milliseconds between publishes
 abp:
-  broker: localhost
+  broker: mqtt
   port: 1883
   topic: source/live/patient_monitor_abp
   period: 10 # milliseconds between publishes
 ppg:
-  broker: localhost
+  broker: mqtt
   port: 1883
   topic: source/live/patient_monitor_ppg
   period: 10 # milliseconds between publishes
 spo2_ards:
-  broker: localhost
+  broker: mqtt
   port: 1883
   topic: source/live/patient_monitor_abp_values
   period: 1 # seconds between publishes
@@ -25,7 +25,7 @@ spo2_ards:
   phase_over_duration: 30 # seconds time for linear change from normal to sick state
   variation: 1
 hr_hpss:
-  broker: localhost
+  broker: mqtt
   port: 1883
   topic: source/live/patient_monitor_ecg_values
   period: 1 # seconds between publishes
@@ -36,7 +36,7 @@ hr_hpss:
   phase_over_duration: 30 # seconds time for linear change from normal to sick state
   variation: 1
 sbp_hpss:
-  broker: localhost
+  broker: mqtt
   port: 1883
   topic: source/live/patient_monitor_ppg_values
   period: 0.6 # seconds between publishes

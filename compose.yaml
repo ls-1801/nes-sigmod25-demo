@@ -16,20 +16,32 @@
 # on localhost, and queries address the worker as localhost:8080. Ports: worker 8080 (gRPC) and 9090 (data), MQTT 1883,
 # MQTT over WebSocket 9001, UI 3000. This needs a rootful Docker (rootless Docker's host network has no NICs).
 #
+# The queries and the generators reach the broker as mqtt:1883. The host network has no service names, so `mqtt` is an /etc/hosts entry
+# in the worker, queries and generator containers: 127.0.0.1 (the `mqtt` service below) unless NES_MQTT_HOST names another device
+# (needed with `--profile headless`, which does not start the broker).
+#
 # Variables: NES_DOCKER_TAG, NES_IMAGE_REPO, NES_ALSA_DEVICE (ALSA capture device in the worker, see `arecord -l`),
-# NES_AUDIO_GID, NES_WORKER_MEMORY_BYTES, NES_DEMO_FAIL_FAST, NES_DEMO_TOPOLOGY.
+# NES_AUDIO_GID, NES_MQTT_HOST, NES_WORKER_MEMORY_BYTES, NES_WORKER_UNPOOLED_MEMORY_FRACTION, NES_DEMO_FAIL_FAST, NES_DEMO_TOPOLOGY.
 name: sigmod
+
+x-mqtt-host: &mqtt-host
+  - "mqtt:${NES_MQTT_HOST:-127.0.0.1}"
 
 services:
   worker:
     image: ${NES_IMAGE_REPO:-nebulastream}/nes-worker:${NES_DOCKER_TAG:-local}
     network_mode: host
+    extra_hosts: *mqtt-host
     working_dir: /nebulastream
     volumes:
       - .:/nebulastream
       - ./asound.conf:/etc/asound.conf:ro
-    devices:
+      # The sound devices as a bind mount, not `devices:`: that copies the device nodes once when the container is
+      # created, so a microphone that shows up later (USB enumeration after boot, a reset) would stay invisible to the
+      # worker. The rule allows ALSA's character devices (major 116).
       - /dev/snd:/dev/snd
+    device_cgroup_rules:
+      - "c 116:* rmw"
     group_add:
       - ${NES_AUDIO_GID:-audio}
     # Aravis (GigE Vision) receives the camera stream through a raw packet socket whenever it is allowed to open one, and
@@ -40,31 +52,64 @@ services:
       - NET_RAW
     environment:
       NES_UDF_PATH: /nebulastream/python_udfs
+      NES_UDF_VENV: /nebulastream/.venv
+      # Compiled Codon UDFs, kept in the repository's .codon-cache so that restarts skip the compilation. Delete the
+      # directory to force a recompile.
+      NES_CODON_CACHE_DIR: /nebulastream/.codon-cache
       NES_ALSA_DEVICE: ${NES_ALSA_DEVICE:-plughw:0,0}
     command:
       - --
-      - --worker.total_memory_in_bytes=${NES_WORKER_MEMORY_BYTES:-8589934592}
+      - --worker.total_memory_in_bytes=${NES_WORKER_MEMORY_BYTES:-4294967296}
+      # The rest of the budget is the fixed pool of buffers, allocated up front: 1 GiB with the defaults.
+      - --worker.unpooled_memory_fraction=${NES_WORKER_UNPOOLED_MEMORY_FRACTION:-0.75}
     healthcheck:
       test: ["CMD", "/bin/grpc_health_probe", "-addr=localhost:8080", "-connect-timeout", "2s"]
       interval: 2s
       timeout: 4s
       retries: 30
       start_period: 5s
+    depends_on:
+      udf-venv:
+        condition: service_completed_successfully
     restart: on-failure
+
+  # The libraries of the Python UDFs (python_udfs/requirements.txt), in a venv of the worker image's CPython in .venv,
+  # which the worker uses through NES_UDF_VENV. Installed on the first start and after a change of requirements.txt
+  # (that needs network access); otherwise this does nothing.
+  # It also writes the worker's version to .nes-worker-version, which queries.sh publishes for the UI (the queries
+  # container has no worker binary).
+  udf-venv:
+    image: ${NES_IMAGE_REPO:-nebulastream}/nes-worker:${NES_DOCKER_TAG:-local}
+    network_mode: host
+    working_dir: /nebulastream
+    volumes:
+      - .:/nebulastream
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        nes-single-node-worker --version > .nes-worker-version 2>&1
+        cmp -s python_udfs/requirements.txt .venv/requirements.txt && exit 0
+        python3 -m venv --clear .venv &&
+          .venv/bin/pip install --no-cache-dir -r python_udfs/requirements.txt &&
+          cp python_udfs/requirements.txt .venv/
 
   # Starts and watches the queries; see queries.sh. The queries are stopped when this container is stopped, which
   # happens before the worker stops because it depends on it. A failed run (worker lost) restarts the container.
   queries:
     image: ${NES_IMAGE_REPO:-nebulastream}/nes-cli:${NES_DOCKER_TAG:-local}
     network_mode: host
+    extra_hosts: *mqtt-host
     working_dir: /nebulastream
     entrypoint: ["/nebulastream/queries.sh"]
     volumes:
       - .:/nebulastream
       - queries-state:/state
+      # The host's list of sound cards, to wait for the microphone (Docker hides /proc/asound in containers).
+      - /proc/asound:/run/host-asound:ro
     environment:
       XDG_STATE_HOME: /state
       NES_CLI: /usr/bin/nes-cli
+      NES_ALSA_DEVICE: ${NES_ALSA_DEVICE:-plughw:0,0}
       NES_DEMO_TOPOLOGY: ${NES_DEMO_TOPOLOGY:-topology.yaml}
       NES_DEMO_FAIL_FAST: ${NES_DEMO_FAIL_FAST:-0}
     depends_on:
@@ -73,25 +118,35 @@ services:
     stop_grace_period: 60s
     restart: on-failure
 
+  # The broker and the web UI are the `ui` profile, which .env turns on by default. `docker compose --profile headless up`
+  # (a profile without services of its own replaces the default one) starts neither, for a broker and UI on another
+  # device: set NES_MQTT_HOST to it.
   mqtt:
+    profiles: [ui]
     image: eclipse-mosquitto:2
     network_mode: host
     volumes:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     restart: unless-stopped
 
-  # Part of the `ui` profile, which .env turns on by default. Without the UI: `docker compose --profile headless up`
-  # (a profile without services of its own replaces the default one).
+  # `ui` profile, see mqtt above.
   webui:
     profiles: [ui]
     image: ${NES_IMAGE_REPO:-nebulastream}/sigmod-ui:${NES_DOCKER_TAG:-local}
     network_mode: host
+    # The query panel pages through the topology the queries service runs.
+    volumes:
+      - ./${NES_DEMO_TOPOLOGY:-topology.yaml}:/usr/share/nginx/html/topology.yaml:ro
     restart: unless-stopped
 
   # Replayed sensors: one "timestamp,value" CSV line per MQTT message on source/live/*
+  # The config.yml (broker, topics, rates) is mounted from generators/, so editing it needs no image rebuild.
   patient-monitor:
     image: ${NES_IMAGE_REPO:-nebulastream}/sigmod-patient-monitor:${NES_DOCKER_TAG:-local}
     network_mode: host
+    extra_hosts: *mqtt-host
+    volumes:
+      - ./generators/patient-monitor/config.yml:/app/config.yml:ro
     init: true
     stop_grace_period: 3s
     restart: on-failure
@@ -99,6 +154,9 @@ services:
   lab-values:
     image: ${NES_IMAGE_REPO:-nebulastream}/sigmod-lab-values:${NES_DOCKER_TAG:-local}
     network_mode: host
+    extra_hosts: *mqtt-host
+    volumes:
+      - ./generators/lab-values/config.yml:/app/config.yml:ro
     init: true
     stop_grace_period: 3s
     restart: on-failure

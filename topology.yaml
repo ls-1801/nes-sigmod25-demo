@@ -12,6 +12,7 @@
 #   pm_hr, pm_sysbp ──> vitals ────┴──> shock alert (alertType 5)
 #   microphone ──> audio_pipe ──> UI waveform, audio_window_pipe ──> audio_label_detection_pipe ──> UI labels, speech alert (9)
 #   MQTT source/live/*  ──>  pass-through queries  ──>  MQTT sink/live/*
+#   system_cpu, system_temperature, system_memory, system_network (Process sources)  ──>  MQTT sink/live/system_*, sink/live/worker_memory
 #
 # Timestamps: video and audio sources deliver nanoseconds, the replayed monitor values microseconds. Everything that
 # is joined or published is converted to microseconds (the UI divides by 1000 to get milliseconds).
@@ -72,7 +73,7 @@ query:
       FROM PIPE(thermal_face)
       INTO MQTT('test/thermal-rgb-image' AS "SINK"."TOPIC",
                 'localhost:8080' AS "SINK"."HOST",
-                'localhost:1883' AS "SINK"."SERVER_URI",
+                'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
 
@@ -104,7 +105,7 @@ query:
             WINDOW TUMBLING(temp_timestamp, SIZE 1000000 MS))
       INTO MQTT('sink/live/alert' AS "SINK"."TOPIC",
                 'localhost:8080' AS "SINK"."HOST",
-                'localhost:1883' AS "SINK"."SERVER_URI",
+                'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
 
@@ -125,7 +126,7 @@ query:
       FROM PIPE(audio_pipe)
       INTO MQTT('sink/live/audio' AS "SINK"."TOPIC",
                 'localhost:8080' AS "SINK"."HOST",
-                'localhost:1883' AS "SINK"."SERVER_URI",
+                'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
   - name: audio_window_pipe
@@ -135,7 +136,7 @@ query:
       FROM (SELECT start AS timestamp, COUNT(*) AS number_of_samples, ARRAY_AGG(CASTTOTYPE(sample AS FLOAT32)) AS audio
             FROM PIPE(audio_pipe)
             WINDOW SLIDING(timestamp, SIZE 1000000 MS, ADVANCE BY 250000 MS))
-      WHERE number_of_samples = 16000
+      WHERE number_of_samples > 15800
       INTO PIPE(audio_window_pipe, "localhost:8080");
   - name: audio_label_detection_pipe
     # language=SQL
@@ -158,10 +159,10 @@ query:
       FROM PIPE(audio_label_detection_pipe)
       INTO MQTT('sink/live/audio_labels' AS "SINK"."TOPIC",
                 'localhost:8080' AS "SINK"."HOST",
-                'localhost:1883' AS "SINK"."SERVER_URI",
+                'mqtt:1883' AS "SINK"."SERVER_URI",
                 0 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
-  # Speech alert: class 9 of the keyword model ("go", see models/kws_labels.csv) heard clearly, at most once every two seconds.
+  # Speech alert: class 8 of the keyword model ("stop", see models/kws_labels.csv) heard clearly, at most once every two seconds.
   # The UI shows alertType 9 as "That was the word ...".
   - name: speech_alert
     # language=SQL
@@ -170,13 +171,13 @@ query:
       FROM (
           SELECT start, class_index, MAX(confidence) AS confidence
           FROM PIPE(audio_label_detection_pipe)
-          WHERE noise_level >= 0.02 AND confidence >= 0.9 AND class_index = UINT64(9)
+          WHERE noise_level >= 0.02 AND confidence >= 0.9 AND class_index = UINT64(8)
           GROUP BY class_index
           WINDOW TUMBLING(timestamp, SIZE 2000000 MS)
           )
       INTO MQTT('sink/live/alert' AS "SINK"."TOPIC",
                 'localhost:8080' AS "SINK"."HOST",
-                'localhost:1883' AS "SINK"."SERVER_URI",
+                'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
 
@@ -191,7 +192,7 @@ query:
       FROM lab_values
       INTO MQTT('sink/live/lab_values' AS "SINK"."TOPIC",
                 'localhost:8080' AS "SINK"."HOST",
-                'localhost:1883' AS "SINK"."SERVER_URI",
+                'mqtt:1883' AS "SINK"."SERVER_URI",
                 0 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
   - name: pm_ecg_s2s
@@ -201,7 +202,7 @@ query:
       FROM pm_ecg
       INTO MQTT('sink/live/patient_monitor_ecg' AS "SINK"."TOPIC",
                 'localhost:8080' AS "SINK"."HOST",
-                'localhost:1883' AS "SINK"."SERVER_URI",
+                'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
   - name: pm_abp_s2s
@@ -211,7 +212,7 @@ query:
       FROM pm_abp
       INTO MQTT('sink/live/patient_monitor_abp' AS "SINK"."TOPIC",
                 'localhost:8080' AS "SINK"."HOST",
-                'localhost:1883' AS "SINK"."SERVER_URI",
+                'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
   - name: pm_ppg_s2s
@@ -221,7 +222,7 @@ query:
       FROM pm_ppg
       INTO MQTT('sink/live/patient_monitor_ppg' AS "SINK"."TOPIC",
                 'localhost:8080' AS "SINK"."HOST",
-                'localhost:1883' AS "SINK"."SERVER_URI",
+                'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
   - name: pm_hr_s2s
@@ -231,7 +232,7 @@ query:
       FROM pm_hr
       INTO MQTT('sink/live/patient_monitor_ecg_values' AS "SINK"."TOPIC",
                 'localhost:8080' AS "SINK"."HOST",
-                'localhost:1883' AS "SINK"."SERVER_URI",
+                'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
   - name: pm_sysbp_s2s
@@ -241,7 +242,7 @@ query:
       FROM pm_sysbp
       INTO MQTT('sink/live/patient_monitor_abp_values' AS "SINK"."TOPIC",
                 'localhost:8080' AS "SINK"."HOST",
-                'localhost:1883' AS "SINK"."SERVER_URI",
+                'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
   - name: pm_spo2_s2s
@@ -251,8 +252,90 @@ query:
       FROM pm_spo2
       INTO MQTT('sink/live/patient_monitor_ppg_values' AS "SINK"."TOPIC",
                 'localhost:8080' AS "SINK"."HOST",
-                'localhost:1883' AS "SINK"."SERVER_URI",
+                'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
+                'JSON' AS "SINK"."OUTPUT_FORMAT")
+
+  # ==========================================================================
+  # System metrics of the machine the worker runs on, printed by Process sources (see `physical`): CPU and temperature
+  # once a second, memory every 10 seconds. The UI plots them in the "System" tile. Timestamps are converted from milliseconds to microseconds like
+  # everything else that is published.
+  # ==========================================================================
+  - name: system_cpu
+    # language=SQL
+    query: |
+      SELECT TIMESTAMP * UINT64(1000) AS "timestamp", CPU_PERCENT AS "cpu_percent", LOAD_1M AS "load_1m"
+      FROM system_cpu
+      INTO MQTT('sink/live/system_cpu' AS "SINK"."TOPIC",
+                'localhost:8080' AS "SINK"."HOST",
+                'mqtt:1883' AS "SINK"."SERVER_URI",
+                0 AS "SINK"."QOS",
+                'JSON' AS "SINK"."OUTPUT_FORMAT")
+  # throttled is the bit mask of `vcgencmd get_throttled` (Raspberry Pi): bits 0-3 undervoltage, frequency capped,
+  # throttled, soft temperature limit right now; bits 16-19 the same since boot. 0 where vcgencmd is not available.
+  - name: system_temperature
+    # language=SQL
+    query: |
+      SELECT TIMESTAMP * UINT64(1000) AS "timestamp", TEMP_C AS "temp_c", THROTTLED AS "throttled"
+      FROM system_temperature
+      INTO MQTT('sink/live/system_temperature' AS "SINK"."TOPIC",
+                'localhost:8080' AS "SINK"."HOST",
+                'mqtt:1883' AS "SINK"."SERVER_URI",
+                0 AS "SINK"."QOS",
+                'JSON' AS "SINK"."OUTPUT_FORMAT")
+  - name: system_memory
+    # language=SQL
+    query: |
+      SELECT TIMESTAMP * UINT64(1000) AS "timestamp",
+             MEM_TOTAL_KB AS "total_kb",
+             MEM_TOTAL_KB - MEM_AVAILABLE_KB AS "used_kb",
+             SWAP_TOTAL_KB - SWAP_FREE_KB AS "swap_used_kb",
+             WORKER_RSS_KB AS "worker_rss_kb"
+      FROM system_memory
+      INTO MQTT('sink/live/system_memory' AS "SINK"."TOPIC",
+                'localhost:8080' AS "SINK"."HOST",
+                'mqtt:1883' AS "SINK"."SERVER_URI",
+                0 AS "SINK"."QOS",
+                'JSON' AS "SINK"."OUTPUT_FORMAT")
+  # Network traffic of the machine in bytes per second, received and sent, summed over its interfaces (the camera's
+  # GigE stream is most of it).
+  - name: system_network
+    # language=SQL
+    query: |
+      SELECT TIMESTAMP * UINT64(1000) AS "timestamp", RX_BYTES_PER_S AS "rx_bytes_per_s", TX_BYTES_PER_S AS "tx_bytes_per_s"
+      FROM system_network
+      INTO MQTT('sink/live/system_network' AS "SINK"."TOPIC",
+                'localhost:8080' AS "SINK"."HOST",
+                'mqtt:1883' AS "SINK"."SERVER_URI",
+                0 AS "SINK"."QOS",
+                'JSON' AS "SINK"."OUTPUT_FORMAT")
+  # Memory of the NES worker process alone: anon_kb is its heap and buffer pool, file_kb the mapped files (libraries,
+  # models). rss_kb = anon_kb + file_kb + shared memory.
+  - name: worker_memory
+    # language=SQL
+    query: |
+      SELECT TIMESTAMP * UINT64(1000) AS "timestamp",
+             MEM_TOTAL_KB AS "total_kb",
+             WORKER_RSS_KB AS "rss_kb",
+             WORKER_RSS_ANON_KB AS "anon_kb",
+             WORKER_RSS_FILE_KB AS "file_kb"
+      FROM system_memory
+      INTO MQTT('sink/live/worker_memory' AS "SINK"."TOPIC",
+                'localhost:8080' AS "SINK"."HOST",
+                'mqtt:1883' AS "SINK"."SERVER_URI",
+                0 AS "SINK"."QOS",
+                'JSON' AS "SINK"."OUTPUT_FORMAT")
+  # One message a second through the worker to the UI, whose red dot in the lower right corner flashes on each: a dot
+  # that stays dark while the page still updates means no heartbeat arrives (worker, query or broker).
+  - name: heartbeat
+    # language=SQL
+    query: |
+      SELECT TIMESTAMP * UINT64(1000) AS "timestamp"
+      FROM heartbeat
+      INTO MQTT('sink/live/heartbeat' AS "SINK"."TOPIC",
+                'localhost:8080' AS "SINK"."HOST",
+                'mqtt:1883' AS "SINK"."SERVER_URI",
+                0 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
 
 # Scalar UDFs, compiled by Codon (python_udfs/demo_udfs.py). A UDF result is always nullable.
@@ -387,6 +470,34 @@ logical:
     schema:
       - { name: TIMESTAMP, type: UINT64, nullable: false }
       - { name: VALUE, type: FLOAT64, nullable: false }
+  - name: system_cpu
+    schema:
+      - { name: TIMESTAMP, type: UINT64, nullable: false }
+      - { name: CPU_PERCENT, type: FLOAT64, nullable: false }
+      - { name: LOAD_1M, type: FLOAT64, nullable: false }
+  - name: system_temperature
+    schema:
+      - { name: TIMESTAMP, type: UINT64, nullable: false }
+      - { name: TEMP_C, type: FLOAT64, nullable: false }
+      - { name: THROTTLED, type: UINT64, nullable: false }
+  - name: system_memory
+    schema:
+      - { name: TIMESTAMP, type: UINT64, nullable: false }
+      - { name: MEM_TOTAL_KB, type: UINT64, nullable: false }
+      - { name: MEM_AVAILABLE_KB, type: UINT64, nullable: false }
+      - { name: SWAP_TOTAL_KB, type: UINT64, nullable: false }
+      - { name: SWAP_FREE_KB, type: UINT64, nullable: false }
+      - { name: WORKER_RSS_KB, type: UINT64, nullable: false }
+      - { name: WORKER_RSS_ANON_KB, type: UINT64, nullable: false }
+      - { name: WORKER_RSS_FILE_KB, type: UINT64, nullable: false }
+  - name: system_network
+    schema:
+      - { name: TIMESTAMP, type: UINT64, nullable: false }
+      - { name: RX_BYTES_PER_S, type: UINT64, nullable: false }
+      - { name: TX_BYTES_PER_S, type: UINT64, nullable: false }
+  - name: heartbeat
+    schema:
+      - { name: TIMESTAMP, type: UINT64, nullable: false }
 
 physical:
   - logical: video
@@ -418,37 +529,112 @@ physical:
     host: localhost:8080
     type: MQTT
     parser_config: { type: CSV, field_delimiter: "," }
-    source_config: { server_uri: 'localhost:1883', topic: source/live/lab_values, qos: 0, flush_interval_ms: 100 }
+    source_config: { server_uri: 'mqtt:1883', topic: source/live/lab_values, qos: 0, flush_interval_ms: 100 }
   - logical: pm_ecg
     host: localhost:8080
     type: MQTT
     parser_config: { type: CSV, field_delimiter: "," }
-    source_config: { server_uri: 'localhost:1883', topic: source/live/patient_monitor_ecg, qos: 1, flush_interval_ms: 50 }
+    source_config: { server_uri: 'mqtt:1883', topic: source/live/patient_monitor_ecg, qos: 1, flush_interval_ms: 50 }
   - logical: pm_abp
     host: localhost:8080
     type: MQTT
     parser_config: { type: CSV, field_delimiter: "," }
-    source_config: { server_uri: 'localhost:1883', topic: source/live/patient_monitor_abp, qos: 1, flush_interval_ms: 50 }
+    source_config: { server_uri: 'mqtt:1883', topic: source/live/patient_monitor_abp, qos: 1, flush_interval_ms: 50 }
   - logical: pm_ppg
     host: localhost:8080
     type: MQTT
     parser_config: { type: CSV, field_delimiter: "," }
-    source_config: { server_uri: 'localhost:1883', topic: source/live/patient_monitor_ppg, qos: 1, flush_interval_ms: 50 }
+    source_config: { server_uri: 'mqtt:1883', topic: source/live/patient_monitor_ppg, qos: 1, flush_interval_ms: 50 }
   - logical: pm_hr
     host: localhost:8080
     type: MQTT
     parser_config: { type: CSV, field_delimiter: "," }
-    source_config: { server_uri: 'localhost:1883', topic: source/live/patient_monitor_ecg_values, qos: 1, flush_interval_ms: 100 }
+    source_config: { server_uri: 'mqtt:1883', topic: source/live/patient_monitor_ecg_values, qos: 1, flush_interval_ms: 100 }
   - logical: pm_sysbp
     host: localhost:8080
     type: MQTT
     parser_config: { type: CSV, field_delimiter: "," }
-    source_config: { server_uri: 'localhost:1883', topic: source/live/patient_monitor_abp_values, qos: 1, flush_interval_ms: 100 }
+    source_config: { server_uri: 'mqtt:1883', topic: source/live/patient_monitor_abp_values, qos: 1, flush_interval_ms: 100 }
   - logical: pm_spo2
     host: localhost:8080
     type: MQTT
     parser_config: { type: CSV, field_delimiter: "," }
-    source_config: { server_uri: 'localhost:1883', topic: source/live/patient_monitor_ppg_values, qos: 1, flush_interval_ms: 100 }
+    source_config: { server_uri: 'mqtt:1883', topic: source/live/patient_monitor_ppg_values, qos: 1, flush_interval_ms: 100 }
+  # System metrics: a Process source runs its command with `bash -c` and parses what it prints, here one JSON object
+  # per line. Temperature and memory print one line and exit, and the worker starts them again after
+  # refresh_interval_ms. CPU usage needs the previous reading, so that command loops and prints a line a second.
+  # The commands run inside the worker container, where /proc and /sys show the host's values. PID is the worker.
+  # TIMESTAMP is in milliseconds (EPOCHREALTIME without its decimal point is microseconds).
+  # CPU usage is the busy share of /proc/stat since the previous line.
+  - logical: system_cpu
+    host: localhost:8080
+    type: Process
+    parser_config:
+      type: JSON
+    source_config:
+      command: >-
+        pt=; while :; do
+        read -r _ u n s i w q sq st _ < /proc/stat; t=$((u+n+s+i+w+q+sq+st)); d=$((i+w));
+        read -r l1 _ < /proc/loadavg;
+        if [ -n "$pt" ] && [ $t -gt $pt ]; then pm=$((1000-1000*(d-pd)/(t-pt)));
+        printf '{"TIMESTAMP":%d,"CPU_PERCENT":%d.%d,"LOAD_1M":%s}\n' $((${EPOCHREALTIME/[.,]/}/1000)) $((pm/10)) $((pm%10)) $l1; fi;
+        pt=$t; pd=$d; sleep 1; done
+      refresh_interval_ms: 1000
+      flush_interval_ms: 100
+  # vcgencmd and /dev/vcio are passed into the worker container by compose.local.yaml on the Raspberry Pi; without
+  # them THROTTLED is 0.
+  - logical: system_temperature
+    host: localhost:8080
+    type: Process
+    parser_config:
+      type: JSON
+    source_config:
+      command: >-
+        read -r mc < /sys/class/thermal/thermal_zone0/temp;
+        th=$(vcgencmd get_throttled 2>/dev/null); th=${th#*=};
+        printf '{"TIMESTAMP":%d,"TEMP_C":%d.%d,"THROTTLED":%d}\n' $((${EPOCHREALTIME/[.,]/}/1000)) $((mc/1000)) $((mc%1000/100)) $((${th:-0}))
+      refresh_interval_ms: 1000
+      flush_interval_ms: 100
+  - logical: system_memory
+    host: localhost:8080
+    type: Process
+    parser_config:
+      type: JSON
+    source_config:
+      command: >-
+        while read -r k v _; do case $k in MemTotal:) mt=$v;; MemAvailable:) ma=$v;; SwapTotal:) st=$v;; SwapFree:) sf=$v;; esac; done < /proc/meminfo;
+        while read -r k v _; do case $k in VmRSS:) rss=$v;; RssAnon:) ra=$v;; RssFile:) rf=$v;; esac; done < /proc/$PID/status;
+        printf '{"TIMESTAMP":%d,"MEM_TOTAL_KB":%d,"MEM_AVAILABLE_KB":%d,"SWAP_TOTAL_KB":%d,"SWAP_FREE_KB":%d,"WORKER_RSS_KB":%d,"WORKER_RSS_ANON_KB":%d,"WORKER_RSS_FILE_KB":%d}\n'
+        $((${EPOCHREALTIME/[.,]/}/1000)) $mt $ma $st $sf $rss $ra $rf
+      refresh_interval_ms: 10000
+      flush_interval_ms: 100
+  # Network traffic since the previous line, over all interfaces but loopback and Docker's bridges (the worker has the
+  # host's network, so /proc/net/dev lists the host's interfaces). The header lines have no "name:" and are skipped.
+  - logical: system_network
+    host: localhost:8080
+    type: Process
+    parser_config:
+      type: JSON
+    source_config:
+      command: >-
+        pt=; while :; do
+        t=$((${EPOCHREALTIME/[.,]/}/1000)); r=0; x=0;
+        while read -r i rb _ _ _ _ _ _ _ tb _; do case $i in lo:|docker*|br-*|veth*) ;; *:) r=$((r+rb)); x=$((x+tb));; esac; done < /proc/net/dev;
+        if [ -n "$pt" ] && [ $t -gt $pt ]; then
+        printf '{"TIMESTAMP":%d,"RX_BYTES_PER_S":%d,"TX_BYTES_PER_S":%d}\n' $t $(((r-pr)*1000/(t-pt))) $(((x-px)*1000/(t-pt))); fi;
+        pt=$t; pr=$r; px=$x; sleep 1; done
+      refresh_interval_ms: 1000
+      flush_interval_ms: 100
+  - logical: heartbeat
+    host: localhost:8080
+    type: Process
+    parser_config:
+      type: JSON
+    source_config:
+      command: >-
+        printf '{"TIMESTAMP":%d}\n' $((${EPOCHREALTIME/[.,]/}/1000))
+      refresh_interval_ms: 1000
+      flush_interval_ms: 100
 
 workers:
   - host: localhost:8080

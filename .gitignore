@@ -1,4 +1,12 @@
 __pycache__/
 *.pyc
+# compiled Codon UDFs, written by the worker
+.codon-cache/
+# libraries of the Python UDFs, created by the udf-venv service
+.venv/
+# the worker's version, written by the udf-venv service
+.nes-worker-version
 # written by the worker and the CLI into their working directory (the repository is mounted there)
 *.log
+# debug dumps of the compiled queries, written by the worker into its working directory
+nautilus_debug_*.ir

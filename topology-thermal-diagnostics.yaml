@@ -1,0 +1,192 @@
+# Diagnostics of the thermal camera, instead of topology.yaml (both need the camera): the camera and the face
+# detection of the demo, with the raw sensor values next to the temperatures, to check the calibration in
+# mono16_to_celsius (python_udfs/demo_udfs.py) against the camera's (range A, -20..80 C):
+#   test/thermal-rgb-image   max_raw: the hottest raw value in the face rectangle, next to max_temp
+#   debug/thermal_raw        stats of every thermal frame: min | median << 16 | p99 << 32 | max << 48 (four uint16)
+# The UI shows the camera tile as with the demo.
+#
+#   NES_DEMO_TOPOLOGY=topology-thermal-diagnostics.yaml docker compose up
+#   docker exec sigmod-mqtt-1 mosquitto_sub -t debug/thermal_raw
+query:
+- name: video_stream
+  query: |
+    SELECT TIMESTAMP / UINT64(1000) AS TIMESTAMP, WIDTH, HEIGHT, PIXEL_FORMAT, IMAGE
+    FROM video
+    INTO PIPE(video_frames, "localhost:8080");
+- name: thermal_face
+  query: |
+    SELECT thermal_timestamp AS timestamp,
+           CASE
+               WHEN face > UINT64(0) THEN
+                   to_base64(thermal_to_jpg_with_rectangle(thermal_image, thermal_width, thermal_height, CASTTOTYPE(face AS UINT64)))
+               ELSE
+                   to_base64(yuyv_to_jpg(rgb_image, rgb_width, rgb_height))
+               END AS image,
+           CASE
+               WHEN face > UINT64(0) THEN
+                   thermal_roi_max_celsius(thermal_image, thermal_width, thermal_height, CASTTOTYPE(face AS UINT64))
+               ELSE FLOAT32(0)
+               END AS max_temp,
+           CASE
+               WHEN face > UINT64(0) THEN
+                   thermal_roi_max_raw(thermal_image, thermal_width, thermal_height, CASTTOTYPE(face AS UINT64))
+               ELSE UINT64(0)
+               END AS max_raw
+    FROM (SELECT thermal_timestamp, thermal_image, thermal_width, thermal_height, rgb_image, rgb_width, rgb_height,
+                 yunet_face_rectangle(packedFaces, rgb_width, rgb_height) AS face
+          FROM MODEL_INFERENCE(
+              yunet, (
+              SELECT thermal_timestamp, thermal_image, thermal_width, thermal_height, rgb_image, rgb_width, rgb_height,
+                     CASTTOTYPE(yunet_preprocess(rgb_image, rgb_width, rgb_height) AS VARSIZED) AS tensor
+              FROM (SELECT timestamp AS thermal_timestamp, image AS thermal_image, width AS thermal_width, height AS thermal_height
+                    FROM PIPE(video_frames)
+                    WHERE PIXEL_FORMAT = 17825799)
+                       ASOF JOIN (SELECT timestamp AS rgb_timestamp, image AS rgb_image, width AS rgb_width, height AS rgb_height
+                                  FROM PIPE(video_frames)
+                                  WHERE PIXEL_FORMAT = 34603058)
+                       TIME(thermal_timestamp, rgb_timestamp)
+              )
+              ))
+    INTO PIPE(thermal_face, "localhost:8080");
+- name: thermal_face_mqtt
+  query: |
+    SELECT timestamp AS "timestamp", image AS "image", max_temp AS "max_temp", max_raw AS "max_raw"
+    FROM PIPE(thermal_face)
+    INTO MQTT('test/thermal-rgb-image' AS "SINK"."TOPIC",
+              'localhost:8080' AS "SINK"."HOST",
+              'mqtt:1883' AS "SINK"."SERVER_URI",
+              1 AS "SINK"."QOS",
+              'JSON' AS "SINK"."OUTPUT_FORMAT")
+- name: thermal_raw_stats
+  query: |
+    SELECT timestamp AS "timestamp", width AS "width", height AS "height",
+           thermal_raw_stats(image, width, height) AS "stats"
+    FROM PIPE(video_frames)
+    WHERE PIXEL_FORMAT = 17825799
+    INTO MQTT('debug/thermal_raw' AS "SINK"."TOPIC",
+              'localhost:8080' AS "SINK"."HOST",
+              'mqtt:1883' AS "SINK"."SERVER_URI",
+              0 AS "SINK"."QOS",
+              'JSON' AS "SINK"."OUTPUT_FORMAT")
+functions:
+- name: yuyv_to_jpg
+  bridge: codon
+  entrypoint: demo_udfs.yuyv_to_jpg
+  args:
+  - name: image
+    type: VARSIZED
+  - name: width
+    type: UINT64
+  - name: height
+    type: UINT64
+  returns: VARSIZED
+- name: thermal_to_jpg_with_rectangle
+  bridge: codon
+  entrypoint: demo_udfs.thermal_to_jpg_with_rectangle
+  args:
+  - name: image
+    type: VARSIZED
+  - name: width
+    type: UINT64
+  - name: height
+    type: UINT64
+  - name: face
+    type: UINT64
+  returns: VARSIZED
+- name: yunet_preprocess
+  bridge: codon
+  entrypoint: demo_udfs.yunet_preprocess
+  args:
+  - name: image
+    type: VARSIZED
+  - name: width
+    type: UINT64
+  - name: height
+    type: UINT64
+  returns: VARSIZED
+- name: yunet_face_rectangle
+  bridge: codon
+  entrypoint: demo_udfs.yunet_face_rectangle
+  args:
+  - name: packed_faces
+    type: VARSIZED
+  - name: width
+    type: UINT64
+  - name: height
+    type: UINT64
+  returns: UINT64
+- name: thermal_roi_max_raw
+  bridge: codon
+  entrypoint: demo_udfs.thermal_roi_max_raw
+  args:
+  - name: image
+    type: VARSIZED
+  - name: width
+    type: UINT64
+  - name: height
+    type: UINT64
+  - name: face
+    type: UINT64
+  returns: UINT64
+- name: thermal_raw_stats
+  bridge: codon
+  entrypoint: demo_udfs.thermal_raw_stats
+  args:
+  - name: image
+    type: VARSIZED
+  - name: width
+    type: UINT64
+  - name: height
+    type: UINT64
+  returns: UINT64
+- name: thermal_roi_max_celsius
+  bridge: codon
+  entrypoint: demo_udfs.thermal_roi_max_celsius
+  args:
+  - name: image
+    type: VARSIZED
+  - name: width
+    type: UINT64
+  - name: height
+    type: UINT64
+  - name: face
+    type: UINT64
+  returns: FLOAT32
+models:
+- name: yunet
+  path: models/face_detection_yunet_2026may_320_packed.onnx
+  input:
+  - name: tensor
+    type: VARSIZED
+  output:
+  - name: packedFaces
+    type: VARSIZED
+logical:
+- name: video
+  schema:
+  - name: TIMESTAMP
+    type: UINT64
+    nullable: false
+  - name: WIDTH
+    type: UINT64
+    nullable: false
+  - name: HEIGHT
+    type: UINT64
+    nullable: false
+  - name: PIXEL_FORMAT
+    type: UINT64
+    nullable: false
+  - name: IMAGE
+    type: VARSIZED
+    nullable: false
+physical:
+- logical: video
+  host: localhost:8080
+  type: Video
+  parser_config:
+    type: NATIVE
+  source_config:
+    SOURCE_SELECTOR: 2
+workers:
+- host: localhost:8080
+  data_address: localhost:9090

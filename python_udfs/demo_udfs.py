@@ -110,6 +110,12 @@ def mono16_to_celsius(power):
 
 def thermal_roi_max_celsius(image, width, height, face):
     """Hottest pixel inside the face rectangle of a 16-bit thermal frame, in degrees Celsius."""
+    return mono16_to_celsius(thermal_roi_max_raw(image, width, height, face))
+
+
+def thermal_roi_max_raw(image, width, height, face):
+    """Hottest raw value inside the face rectangle of a 16-bit thermal frame (thermal_roi_max_celsius before the
+    calibration)."""
     mono16 = np.frombuffer(image, dtype=np.uint16).reshape((int(height), int(width)))
     x0 = min(int(face & 0xFFFF), int(width))
     y0 = min(int((face >> 16) & 0xFFFF), int(height))
@@ -121,7 +127,39 @@ def thermal_roi_max_celsius(image, width, height, face):
             value = int(mono16[row, column])
             if value > maximum:
                 maximum = value
-    return mono16_to_celsius(maximum)
+    return maximum
+
+
+def thermal_raw_stats(image, width, height):
+    """Raw values of a 16-bit thermal frame, to check the calibration: minimum, median, 99th percentile and maximum,
+    packed as four little-endian uint16 values (min | median << 16 | p99 << 32 | max << 48)."""
+    mono16 = np.frombuffer(image, dtype=np.uint16)
+    n = min(int(mono16.size), int(width) * int(height))
+    counts = [0] * 65536
+    for i in range(n):
+        counts[int(mono16[i])] += 1
+    median_rank = n // 2
+    p99_rank = (n * 99) // 100
+    minimum = -1
+    median = 0
+    p99 = 0
+    maximum = 0
+    seen = 0
+    for value in range(65536):
+        count = counts[value]
+        if count == 0:
+            continue
+        if minimum < 0:
+            minimum = value
+        if seen <= median_rank < seen + count:
+            median = value
+        if seen <= p99_rank < seen + count:
+            p99 = value
+        maximum = value
+        seen += count
+    if minimum < 0:
+        minimum = 0
+    return minimum | (median << 16) | (p99 << 32) | (maximum << 48)
 
 
 def thermal_to_jpg(image, width, height):
@@ -249,6 +287,7 @@ def audio_to_mfcc(audio):
     log, orthonormal DCT-II. Matches numpy/scipy to ~1e-6.
     """
     samples = np.frombuffer(audio, dtype=np.float32)
+    available = int(samples.size)
     n = 16000
     nfft = 512
     frame_len = 400
@@ -307,7 +346,8 @@ def audio_to_mfcc(audio):
                 j = -j
             if j >= n:
                 j = 2 * (n - 1) - j
-            windowed[i] = float(samples[j]) * window[i]
+            # windows may hold a few samples less (or more) than 16000: zero-pad / truncate to the model input size
+            windowed[i] = (float(samples[j]) if j < available else 0.0) * window[i]
         for b in range(bins):
             re = 0.0
             im = 0.0
