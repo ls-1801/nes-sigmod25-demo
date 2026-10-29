@@ -8,5 +8,8 @@ __pycache__/
 .nes-worker-version
 # written by the worker and the CLI into their working directory (the repository is mounted there)
 *.log
+# latency traces of the worker, see NES_LATENCY_TRACE_PREFIX in compose.yaml
+latency-trace/
 # debug dumps of the compiled queries, written by the worker into its working directory
 nautilus_debug_*.ir
+nes-latency-trace.*

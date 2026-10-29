@@ -31,6 +31,8 @@ services:
   worker:
     image: ${NES_IMAGE_REPO:-nebulastream}/nes-worker:${NES_DOCKER_TAG:-local}
     network_mode: host
+    # The latency trace names threads by their kernel thread ids, which the OS scheduling trace (latency_sched.sh) matches.
+    pid: host
     extra_hosts: *mqtt-host
     working_dir: /nebulastream
     volumes:
@@ -56,6 +58,8 @@ services:
       # Compiled Codon UDFs, kept in the repository's .codon-cache so that restarts skip the compilation. Delete the
       # directory to force a recompile.
       NES_CODON_CACHE_DIR: /nebulastream/.codon-cache
+      # Event trace files of the worker (nes-cli trace on <query>), one .bin and .plan per worker process.
+      NES_LATENCY_TRACE_PREFIX: /nebulastream/latency-trace/nes
       NES_ALSA_DEVICE: ${NES_ALSA_DEVICE:-plughw:0,0}
     command:
       - --
