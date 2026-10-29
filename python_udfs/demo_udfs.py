@@ -162,6 +162,25 @@ def thermal_raw_stats(image, width, height):
     return minimum | (median << 16) | (p99 << 32) | (maximum << 48)
 
 
+# Affine transform from thermal to RGB frame pixels (x' = a*x + b*y + c, y' = d*x + e*y + f), so that a face rectangle
+# found on the RGB frame covers the same spot on the aligned thermal frame. The two cameras sit side by side, so one
+# matrix is exact for one distance only (parallax); calibrate it at the distance of a face with
+# tools/thermal_calibration.py. The thermal camera sees a narrower field, so its frame covers the middle ~73% of the
+# RGB frame (scale 0.728, rotation -0.5 degrees; person at about 1 m, 2026-10-28).
+THERMAL_TO_RGB = ((0.72810, -0.00635, 87.03),
+                  (0.00635, 0.72810, 51.47))
+
+
+def thermal_align_to_rgb(image, width, height):
+    """16-bit thermal frame warped into the RGB camera's pixel grid (THERMAL_TO_RGB) -> 16-bit frame of the same size.
+    Pixels outside the thermal camera's view repeat the nearest border pixel."""
+    mono16 = np.frombuffer(image, dtype=np.uint16).reshape((int(height), int(width)))
+    m = np.array([[THERMAL_TO_RGB[0][0], THERMAL_TO_RGB[0][1], THERMAL_TO_RGB[0][2]],
+                  [THERMAL_TO_RGB[1][0], THERMAL_TO_RGB[1][1], THERMAL_TO_RGB[1][2]]])
+    aligned = cv2.warpAffine(mono16, m, (int(width), int(height)), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    return str(aligned.data.as_byte(), int(aligned.nbytes))
+
+
 def thermal_to_jpg(image, width, height):
     """16-bit thermal frame, min-max normalised and INFERNO colour mapped -> JPEG."""
     return _encode_jpeg(_mono16_to_color(image, width, height))
