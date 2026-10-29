@@ -25,7 +25,7 @@ query:
     query: |
       SELECT TIMESTAMP / UINT64(1000) AS TIMESTAMP, WIDTH, HEIGHT, PIXEL_FORMAT, IMAGE
       FROM video
-      INTO PIPE(video_frames, "localhost:8080");
+      INTO PIPE(video_frames, "192.168.1.103:8080");
 
   # Face detection on the latest RGB frame for every thermal frame (ASOF join), with the YuNet model: the frame is
   # resized to the 320x320 input tensor by a Python UDF, and a second UDF decodes the model output into the face
@@ -64,7 +64,7 @@ query:
                          TIME(thermal_timestamp, rgb_timestamp)
                 )
                 ))
-      INTO PIPE(thermal_face, "localhost:8080");
+      INTO PIPE(thermal_face, "192.168.1.103:8080");
 
   - name: thermal_face_mqtt
     # language=SQL
@@ -72,7 +72,7 @@ query:
       SELECT timestamp AS "timestamp", image AS "image", max_temp AS "max_temp"
       FROM PIPE(thermal_face)
       INTO MQTT('test/thermal-rgb-image' AS "SINK"."TOPIC",
-                'localhost:8080' AS "SINK"."HOST",
+                '192.168.1.102:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
@@ -89,7 +89,7 @@ query:
       FROM (SELECT timestamp AS hr_timestamp, value AS hr_value FROM pm_hr)
                ASOF JOIN (SELECT timestamp AS bp_timestamp, value AS bp_value FROM pm_sysbp)
                TIME(hr_timestamp, bp_timestamp)
-      INTO PIPE(vitals, "localhost:8080");
+      INTO PIPE(vitals, "192.168.1.103:8080");
   - name: shock_alert
     # language=SQL
     query: |
@@ -104,7 +104,7 @@ query:
             WHERE hr_value / bp_value > 1
             WINDOW TUMBLING(temp_timestamp, SIZE 1000000 MS))
       INTO MQTT('sink/live/alert' AS "SINK"."TOPIC",
-                'localhost:8080' AS "SINK"."HOST",
+                '192.168.1.102:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
@@ -117,7 +117,7 @@ query:
     query: |
       SELECT timestamp / 1000 AS timestamp, sample
       FROM microphone
-      INTO PIPE(audio_pipe, "localhost:8080");
+      INTO PIPE(audio_pipe, "192.168.1.103:8080");
   # The UI plots int16-range samples, the microphone delivers normalised floats.
   - name: audio_waveform
     # language=SQL
@@ -125,7 +125,7 @@ query:
       SELECT timestamp AS "timestamp", sample * FLOAT64(32768) AS "value"
       FROM PIPE(audio_pipe)
       INTO MQTT('sink/live/audio' AS "SINK"."TOPIC",
-                'localhost:8080' AS "SINK"."HOST",
+                '192.168.1.102:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
@@ -137,7 +137,7 @@ query:
             FROM PIPE(audio_pipe)
             WINDOW SLIDING(timestamp, SIZE 1000000 MS, ADVANCE BY 250000 MS))
       WHERE number_of_samples > 15800
-      INTO PIPE(audio_window_pipe, "localhost:8080");
+      INTO PIPE(audio_window_pipe, "192.168.1.103:8080");
   - name: audio_label_detection_pipe
     # language=SQL
     query: |
@@ -148,7 +148,7 @@ query:
           FROM PIPE(audio_window_pipe)
           )
           )
-      INTO PIPE(audio_label_detection_pipe, "localhost:8080");
+      INTO PIPE(audio_label_detection_pipe, "192.168.1.103:8080");
   # Every detection window of the keyword model (every 250 ms) for the UI: the recognized class and the audio level,
   # which the audio panel shows over the last five seconds (also useful to see why speech_alert does not fire).
   # The class index is the output position of the keyword model (models/kws_labels.csv); the UI names the classes.
@@ -158,7 +158,7 @@ query:
       SELECT timestamp AS "timestamp", class_index AS "class_index", confidence AS "confidence", noise_level AS "noise_level"
       FROM PIPE(audio_label_detection_pipe)
       INTO MQTT('sink/live/audio_labels' AS "SINK"."TOPIC",
-                'localhost:8080' AS "SINK"."HOST",
+                '192.168.1.102:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 0 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
@@ -176,7 +176,7 @@ query:
           WINDOW TUMBLING(timestamp, SIZE 2000000 MS)
           )
       INTO MQTT('sink/live/alert' AS "SINK"."TOPIC",
-                'localhost:8080' AS "SINK"."HOST",
+                '192.168.1.102:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
@@ -191,7 +191,7 @@ query:
       SELECT timestamp AS "timestamp", biosignal AS "biosignal", value AS "value"
       FROM lab_values
       INTO MQTT('sink/live/lab_values' AS "SINK"."TOPIC",
-                'localhost:8080' AS "SINK"."HOST",
+                '192.168.1.102:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 0 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
@@ -201,7 +201,7 @@ query:
       SELECT timestamp AS "timestamp", value AS "value"
       FROM pm_ecg
       INTO MQTT('sink/live/patient_monitor_ecg' AS "SINK"."TOPIC",
-                'localhost:8080' AS "SINK"."HOST",
+                '192.168.1.102:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
@@ -211,7 +211,7 @@ query:
       SELECT timestamp AS "timestamp", value AS "value"
       FROM pm_abp
       INTO MQTT('sink/live/patient_monitor_abp' AS "SINK"."TOPIC",
-                'localhost:8080' AS "SINK"."HOST",
+                '192.168.1.102:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
@@ -221,7 +221,7 @@ query:
       SELECT timestamp AS "timestamp", value AS "value"
       FROM pm_ppg
       INTO MQTT('sink/live/patient_monitor_ppg' AS "SINK"."TOPIC",
-                'localhost:8080' AS "SINK"."HOST",
+                '192.168.1.102:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
@@ -231,7 +231,7 @@ query:
       SELECT timestamp AS "timestamp", value AS "value"
       FROM pm_hr
       INTO MQTT('sink/live/patient_monitor_ecg_values' AS "SINK"."TOPIC",
-                'localhost:8080' AS "SINK"."HOST",
+                '192.168.1.102:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
@@ -241,7 +241,7 @@ query:
       SELECT timestamp AS "timestamp", value AS "value"
       FROM pm_sysbp
       INTO MQTT('sink/live/patient_monitor_abp_values' AS "SINK"."TOPIC",
-                'localhost:8080' AS "SINK"."HOST",
+                '192.168.1.102:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
@@ -251,7 +251,7 @@ query:
       SELECT timestamp AS "timestamp", value AS "value"
       FROM pm_spo2
       INTO MQTT('sink/live/patient_monitor_ppg_values' AS "SINK"."TOPIC",
-                'localhost:8080' AS "SINK"."HOST",
+                '192.168.1.102:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 1 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
@@ -267,7 +267,7 @@ query:
       SELECT TIMESTAMP * UINT64(1000) AS "timestamp", CPU_PERCENT AS "cpu_percent", LOAD_1M AS "load_1m"
       FROM system_cpu
       INTO MQTT('sink/live/system_cpu' AS "SINK"."TOPIC",
-                'localhost:8080' AS "SINK"."HOST",
+                '192.168.1.102:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 0 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
@@ -279,7 +279,7 @@ query:
       SELECT TIMESTAMP * UINT64(1000) AS "timestamp", TEMP_C AS "temp_c", THROTTLED AS "throttled"
       FROM system_temperature
       INTO MQTT('sink/live/system_temperature' AS "SINK"."TOPIC",
-                'localhost:8080' AS "SINK"."HOST",
+                '192.168.1.102:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 0 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
@@ -293,7 +293,7 @@ query:
              WORKER_RSS_KB AS "worker_rss_kb"
       FROM system_memory
       INTO MQTT('sink/live/system_memory' AS "SINK"."TOPIC",
-                'localhost:8080' AS "SINK"."HOST",
+                '192.168.1.102:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 0 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
@@ -305,7 +305,7 @@ query:
       SELECT TIMESTAMP * UINT64(1000) AS "timestamp", RX_BYTES_PER_S AS "rx_bytes_per_s", TX_BYTES_PER_S AS "tx_bytes_per_s"
       FROM system_network
       INTO MQTT('sink/live/system_network' AS "SINK"."TOPIC",
-                'localhost:8080' AS "SINK"."HOST",
+                '192.168.1.102:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 0 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
@@ -321,7 +321,7 @@ query:
              WORKER_RSS_FILE_KB AS "file_kb"
       FROM system_memory
       INTO MQTT('sink/live/worker_memory' AS "SINK"."TOPIC",
-                'localhost:8080' AS "SINK"."HOST",
+                '192.168.1.102:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 0 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
@@ -333,7 +333,7 @@ query:
       SELECT TIMESTAMP * UINT64(1000) AS "timestamp"
       FROM heartbeat
       INTO MQTT('sink/live/heartbeat' AS "SINK"."TOPIC",
-                'localhost:8080' AS "SINK"."HOST",
+                '192.168.1.102:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 0 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
@@ -501,21 +501,21 @@ logical:
 
 physical:
   - logical: video
-    host: localhost:8080
+    host: 192.168.1.103:8080
     type: Video
     parser_config:
       type: NATIVE
     source_config:
       SOURCE_SELECTOR: 2
   - logical: microphone
-    host: localhost:8080
+    host: 192.168.1.103:8080
     type: Audio
     parser_config:
       type: NATIVE
     source_config:
       SAMPLE_RATE: 16000
   - logical: kws_labels
-    host: localhost:8080
+    host: 192.168.1.103:8080
     type: File
     parser_config:
       type: CSV
@@ -526,37 +526,37 @@ physical:
   # The source topics follow the original demo: the generator "spo2_ards" feeds abp_values (systolic pressure),
   # "hr_hpss" feeds ecg_values (heart rate) and "sbp_hpss" feeds ppg_values (SpO2).
   - logical: lab_values
-    host: localhost:8080
+    host: 192.168.1.103:8080
     type: MQTT
     parser_config: { type: CSV, field_delimiter: "," }
     source_config: { server_uri: 'mqtt:1883', topic: source/live/lab_values, qos: 0, flush_interval_ms: 100 }
   - logical: pm_ecg
-    host: localhost:8080
+    host: 192.168.1.103:8080
     type: MQTT
     parser_config: { type: CSV, field_delimiter: "," }
     source_config: { server_uri: 'mqtt:1883', topic: source/live/patient_monitor_ecg, qos: 1, flush_interval_ms: 50 }
   - logical: pm_abp
-    host: localhost:8080
+    host: 192.168.1.103:8080
     type: MQTT
     parser_config: { type: CSV, field_delimiter: "," }
     source_config: { server_uri: 'mqtt:1883', topic: source/live/patient_monitor_abp, qos: 1, flush_interval_ms: 50 }
   - logical: pm_ppg
-    host: localhost:8080
+    host: 192.168.1.103:8080
     type: MQTT
     parser_config: { type: CSV, field_delimiter: "," }
     source_config: { server_uri: 'mqtt:1883', topic: source/live/patient_monitor_ppg, qos: 1, flush_interval_ms: 50 }
   - logical: pm_hr
-    host: localhost:8080
+    host: 192.168.1.103:8080
     type: MQTT
     parser_config: { type: CSV, field_delimiter: "," }
     source_config: { server_uri: 'mqtt:1883', topic: source/live/patient_monitor_ecg_values, qos: 1, flush_interval_ms: 100 }
   - logical: pm_sysbp
-    host: localhost:8080
+    host: 192.168.1.103:8080
     type: MQTT
     parser_config: { type: CSV, field_delimiter: "," }
     source_config: { server_uri: 'mqtt:1883', topic: source/live/patient_monitor_abp_values, qos: 1, flush_interval_ms: 100 }
   - logical: pm_spo2
-    host: localhost:8080
+    host: 192.168.1.103:8080
     type: MQTT
     parser_config: { type: CSV, field_delimiter: "," }
     source_config: { server_uri: 'mqtt:1883', topic: source/live/patient_monitor_ppg_values, qos: 1, flush_interval_ms: 100 }
@@ -567,7 +567,7 @@ physical:
   # TIMESTAMP is in milliseconds (EPOCHREALTIME without its decimal point is microseconds).
   # CPU usage is the busy share of /proc/stat since the previous line.
   - logical: system_cpu
-    host: localhost:8080
+    host: 192.168.1.103:8080
     type: Process
     parser_config:
       type: JSON
@@ -584,7 +584,7 @@ physical:
   # vcgencmd and /dev/vcio are passed into the worker container by compose.local.yaml on the Raspberry Pi; without
   # them THROTTLED is 0.
   - logical: system_temperature
-    host: localhost:8080
+    host: 192.168.1.103:8080
     type: Process
     parser_config:
       type: JSON
@@ -596,7 +596,7 @@ physical:
       refresh_interval_ms: 1000
       flush_interval_ms: 100
   - logical: system_memory
-    host: localhost:8080
+    host: 192.168.1.103:8080
     type: Process
     parser_config:
       type: JSON
@@ -611,7 +611,7 @@ physical:
   # Network traffic since the previous line, over all interfaces but loopback and Docker's bridges (the worker has the
   # host's network, so /proc/net/dev lists the host's interfaces). The header lines have no "name:" and are skipped.
   - logical: system_network
-    host: localhost:8080
+    host: 192.168.1.103:8080
     type: Process
     parser_config:
       type: JSON
@@ -626,7 +626,7 @@ physical:
       refresh_interval_ms: 1000
       flush_interval_ms: 100
   - logical: heartbeat
-    host: localhost:8080
+    host: 192.168.1.103:8080
     type: Process
     parser_config:
       type: JSON
@@ -636,6 +636,11 @@ physical:
       refresh_interval_ms: 1000
       flush_interval_ms: 100
 
+# Two workers: the edge Pi runs the sources (camera, microphone, MQTT sensors, system metrics) and most operators, and
+# sends the results to the hub Pi, which runs the MQTT sinks next to the broker and the UI.
 workers:
-  - host: localhost:8080
-    data_address: localhost:9090
+  - host: 192.168.1.103:8080
+    data_address: 192.168.1.103:9090
+    downstream: [192.168.1.102:8080]
+  - host: 192.168.1.102:8080
+    data_address: 192.168.1.102:9090
