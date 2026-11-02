@@ -100,8 +100,8 @@ host, port = sys.argv[1].rsplit(":", 1)
 override = sys.argv[3] if len(sys.argv) > 3 else ""
 queries = []
 for line in sys.stdin:
-    name, status, *error = line.rstrip("\n").split(" ", 2)
-    if name:
+    if line.strip():
+        name, status, *error = line.rstrip("\n").split(" ", 2)
         queries.append({"name": name, "status": override or status, "error": "" if override or not error else error[0]})
 
 def version(text):

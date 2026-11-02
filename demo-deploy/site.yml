@@ -178,7 +178,7 @@
       changed_when: false
       failed_when: false
       check_mode: false
-    - name: All queries run
+    - name: All queries run (queries.sh logs that a minute after starting them)
       ansible.builtin.shell: docker logs --since {{ since.stdout }} sigmod-queries-1 2>&1 | grep -E 'queries running|failed|gone' | tail -1
       register: queries
       until: queries.stdout is regex('(\\d+)/\\1 queries running')
