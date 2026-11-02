@@ -1,15 +1,7 @@
-# This machine only: worker, CLI and UI images from the registry on the build machine. The other images are local.
+# Raspberry Pi only: `vcgencmd get_throttled` for the system_temperature source of the topology.
 services:
   worker:
-    image: 192.168.1.99:5000/nes-worker:${NES_DOCKER_TAG:-local}
-    # `vcgencmd get_throttled` for the system_temperature source of topology.yaml.
     devices:
       - /dev/vcio:/dev/vcio
     volumes:
       - /usr/bin/vcgencmd:/usr/bin/vcgencmd:ro
-  udf-venv:
-    image: 192.168.1.99:5000/nes-worker:${NES_DOCKER_TAG:-local}
-  queries:
-    image: 192.168.1.99:5000/nes-cli:${NES_DOCKER_TAG:-local}
-  webui:
-    image: 192.168.1.99:5000/sigmod-ui:${NES_DOCKER_TAG:-local}

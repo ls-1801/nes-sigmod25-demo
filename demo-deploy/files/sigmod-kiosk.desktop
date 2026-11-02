@@ -1,0 +1,4 @@
+[Desktop Entry]
+Type=Application
+Name=SIGMOD demo kiosk
+Exec=/usr/local/bin/sigmod-kiosk

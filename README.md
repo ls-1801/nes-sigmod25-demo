@@ -1,7 +1,9 @@
 # NebulaStream SIGMOD '25 demo
 
 Camera, microphone and replayed patient-monitor / lab-value streams processed by NebulaStream and shown in the SIGMOD UI.
-The queries are in [`topology.yaml`](topology.yaml), the Python UDFs (compiled by Codon inside the worker) in
+The demo runs on two Raspberry Pis, set up and updated by [`demo-deploy/`](demo-deploy/) (Ansible). The queries are in
+[`demo-deploy/templates/topology.yaml.j2`](demo-deploy/templates/topology.yaml.j2), rendered into `topology.yaml` with the
+Pis' addresses from the inventory; the Python UDFs (compiled by Codon inside the worker) in
 [`python_udfs/`](python_udfs/), the models in [`models/`](models/).
 
 ```

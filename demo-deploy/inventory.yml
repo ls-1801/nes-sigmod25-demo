@@ -1,0 +1,22 @@
+# The two Pis of the demo. Moving the demo to other Pis means editing this file and running the playbook again.
+all:
+  vars:
+    ansible_user: pi
+    registry: 192.168.1.99:5000          # build machine; the Pis pull over plain http (publish-images.sh pushes there)
+    demo_tag: demo-rebase-10-29-2026     # tag of nes-worker, nes-cli, sigmod-ui, sigmod-patient-monitor, sigmod-lab-values
+    ntp_server: 192.168.1.99             # both Pis sync their clocks to it (the UI compares the hub's clock with the edge's timestamps)
+  children:
+    hub:        # MQTT broker, web UI + kiosk, generators, queries service, worker with the MQTT sinks
+      hosts:
+        hub-pi:
+          ansible_host: 192.168.1.102
+          demo_dir: /nvme/nes-sigmod25-demo
+          docker_data_root: /nvme/docker-data      # optional, Docker's default otherwise
+    edge:       # worker with the sources (camera, sensors, metrics) and most operators
+      hosts:
+        edge-pi:
+          ansible_host: 192.168.1.103
+          demo_dir: /home/pi/data/nes-sigmod25-demo
+          docker_data_root: /home/pi/data/docker
+          docker_mtu: 1400
+          microphone: K66                          # ALSA card name (/proc/asound/cards); set on exactly one Pi

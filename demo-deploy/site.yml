@@ -1,0 +1,197 @@
+# Sets up both Pis from the network configuration on (Raspberry Pi OS trixie with desktop, camera reachable) and starts the
+# demo, which then comes back on every boot: `ansible-playbook site.yml`. Running it again updates files, images and
+# services. The Pis need internet access while it runs (Docker packages, the broker image, the UDF libraries).
+
+- name: The images are in the registry
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: The image is in the registry
+      ansible.builtin.uri:
+        url: "http://{{ registry }}/v2/{{ item }}/manifests/{{ demo_tag }}"
+        method: HEAD
+        headers:
+          Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json
+      loop: [nes-worker, nes-cli, sigmod-ui, sigmod-patient-monitor, sigmod-lab-values]
+
+- name: Docker, clock and demo files
+  hosts: all
+  become: true
+  vars:
+    hub_host: "{{ hostvars[groups['hub'][0]].ansible_host }}"
+    edge_host: "{{ hostvars[groups['edge'][0]].ansible_host }}"
+    # The physical microphone source runs on the Pi with the microphone.
+    microphone_host: "{{ (groups['all'] | map('extract', hostvars) | selectattr('microphone', 'defined') | first).ansible_host }}"
+  tasks:
+    - ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop: [/etc/apt/keyrings, /etc/docker, /etc/systemd/timesyncd.conf.d]
+    - name: Docker's apt repository
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/debian/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+    - ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/docker.sources
+        content: |
+          Types: deb
+          URIs: https://download.docker.com/linux/debian
+          Suites: {{ ansible_distribution_release }}
+          Components: stable
+          Architectures: arm64
+          Signed-By: /etc/apt/keyrings/docker.asc
+        mode: "0644"
+    - name: Docker
+      ansible.builtin.apt:
+        name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]
+        update_cache: true
+    - name: Docker pulls from the registry on the build machine
+      ansible.builtin.template:
+        src: templates/daemon.json.j2
+        dest: /etc/docker/daemon.json
+        mode: "0644"
+      notify: Restart docker
+    - name: pi may use Docker and the sound cards
+      ansible.builtin.user:
+        name: pi
+        groups: [docker, audio]
+        append: true
+    - name: Clock from the build machine
+      ansible.builtin.template:
+        src: templates/timesyncd.conf.j2
+        dest: /etc/systemd/timesyncd.conf.d/nes.conf
+        mode: "0644"
+      notify: Restart timesyncd
+    - ansible.builtin.meta: flush_handlers
+
+    - name: Demo directory
+      ansible.builtin.file:
+        path: "{{ demo_dir }}"
+        state: directory
+        owner: pi
+        group: pi
+    - name: Demo files
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../{{ item }}"
+        dest: "{{ demo_dir }}/"
+        owner: pi
+        group: pi
+        mode: preserve
+      loop: [compose.yaml, compose.local.yaml, run-demo.sh, queries.sh, asound.conf, mosquitto.conf, python_udfs, models, generators]
+    - name: Per-Pi settings (.env)
+      ansible.builtin.template:
+        src: templates/env.j2
+        dest: "{{ demo_dir }}/.env"
+        owner: pi
+        group: pi
+        mode: "0644"
+    - name: The topology, on the hub, where the queries service runs
+      ansible.builtin.template:
+        src: templates/topology.yaml.j2
+        dest: "{{ demo_dir }}/topology.yaml"
+        owner: pi
+        group: pi
+        mode: "0644"
+      when: "'hub' in group_names"
+    - name: Images
+      ansible.builtin.command: ./run-demo.sh pull
+      args:
+        chdir: "{{ demo_dir }}"
+      changed_when: false
+    - name: sigmod-demo.service starts the demo on boot
+      ansible.builtin.template:
+        src: templates/sigmod-demo.service.j2
+        dest: /etc/systemd/system/sigmod-demo.service
+        mode: "0644"
+    - ansible.builtin.systemd_service:
+        name: sigmod-demo
+        enabled: true
+        daemon_reload: true
+  handlers:
+    - name: Restart docker
+      ansible.builtin.systemd_service:
+        name: docker
+        state: restarted
+    - name: Restart timesyncd
+      ansible.builtin.systemd_service:
+        name: systemd-timesyncd
+        state: restarted
+
+- name: Kiosk on the hub's screen
+  hosts: hub
+  become: true
+  tasks:
+    - ansible.builtin.apt:
+        name: [cage, chromium, curl, lightdm]
+    - ansible.builtin.copy:
+        src: files/sigmod-kiosk
+        dest: /usr/local/bin/sigmod-kiosk
+        mode: "0755"
+    - ansible.builtin.copy:
+        src: files/sigmod-kiosk.desktop
+        dest: /usr/share/wayland-sessions/sigmod-kiosk.desktop
+        mode: "0644"
+      notify: Restart lightdm
+    - name: Log pi into the kiosk session on boot
+      community.general.ini_file:
+        path: /etc/lightdm/lightdm.conf
+        section: "Seat:*"
+        option: "{{ item.key }}"
+        value: "{{ item.value }}"
+        no_extra_spaces: true
+        mode: "0644"
+      loop: "{{ {'user-session': 'sigmod-kiosk', 'autologin-user': 'pi', 'autologin-session': 'sigmod-kiosk'} | dict2items }}"
+      notify: Restart lightdm
+    - name: Boot into the graphical session
+      ansible.builtin.file:
+        src: /lib/systemd/system/graphical.target
+        dest: /etc/systemd/system/default.target
+        state: link
+  handlers:
+    - name: Restart lightdm
+      ansible.builtin.systemd_service:
+        name: lightdm
+        state: restarted
+
+# The edge first: the hub's queries service starts the queries on both workers once they are healthy.
+- name: Start the demo on the edge
+  hosts: edge
+  become: true
+  tasks: &start
+    - ansible.builtin.command: date +%s
+      register: since
+      changed_when: false
+      check_mode: false
+    - name: (Re)start sigmod-demo (it waits for the microphone, without a time limit)
+      ansible.builtin.systemd_service:
+        name: sigmod-demo
+        state: restarted
+        no_block: true
+    - name: The worker is healthy
+      ansible.builtin.command: docker inspect -f '{{ "{{" }}.State.Health.Status{{ "}}" }}' sigmod-worker-1
+      register: health
+      until: health.stdout == 'healthy'
+      retries: 90
+      delay: 10
+      changed_when: false
+      failed_when: false
+      check_mode: false
+    - name: All queries run
+      ansible.builtin.shell: docker logs --since {{ since.stdout }} sigmod-queries-1 2>&1 | grep -E 'queries running|failed|gone' | tail -1
+      register: queries
+      until: queries.stdout is regex('(\\d+)/\\1 queries running')
+      retries: 60
+      delay: 10
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: "'hub' in group_names"
+    - ansible.builtin.debug:
+        msg: "worker {{ health.stdout }}{{ '; ' ~ queries.stdout if queries.stdout is defined else '' }}"
+
+- name: Start the demo on the hub
+  hosts: hub
+  become: true
+  tasks: *start

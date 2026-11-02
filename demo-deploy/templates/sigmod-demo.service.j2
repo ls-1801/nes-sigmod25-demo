@@ -1,0 +1,19 @@
+# Rendered by demo-deploy.
+[Unit]
+Description=SIGMOD demo (docker compose)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+RequiresMountsFor={{ demo_dir }}
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory={{ demo_dir }}
+ExecStart={{ demo_dir }}/run-demo.sh
+ExecStop={{ demo_dir }}/run-demo.sh stop
+TimeoutStartSec=infinity
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

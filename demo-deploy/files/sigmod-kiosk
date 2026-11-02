@@ -1,0 +1,10 @@
+#!/bin/sh
+# Kiosk session (lightdm autologin): fullscreen Chromium on the demo UI inside cage.
+# Waits for the UI, and restarts Chromium if it exits so the session never drops back to the greeter.
+URL=${1:-http://localhost:3000}
+exec cage -- sh -c '
+  until curl -sf -o /dev/null "$0"; do sleep 1; done
+  while :; do
+    chromium --kiosk --incognito --password-store=basic --no-first-run --noerrdialogs --ozone-platform=wayland "$0"
+    sleep 1
+  done' "$URL"

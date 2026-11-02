@@ -13,3 +13,7 @@ latency-trace/
 # debug dumps of the compiled queries, written by the worker into its working directory
 nautilus_debug_*.ir
 nes-latency-trace.*
+# per-Pi settings, rendered by demo-deploy
+.env
+# rendered by demo-deploy from demo-deploy/templates/topology.yaml.j2
+/topology.yaml

@@ -15,7 +15,8 @@
 # Environment:
 #   NES_CLI                   nes-cli binary (default nes-cli)
 #   NES_DEMO_TOPOLOGY         topology file (default topology.yaml)
-#   NES_WORKER_ADDRESS        gRPC address of the worker (default localhost:8080)
+#   NES_WORKER_ADDRESS        gRPC addresses of the workers, space separated (default: the hosts of the topology's
+#                             workers, localhost:8080 without them)
 #   NES_DEMO_MQTT_ADDRESS     host:port of the MQTT broker the queries use (default mqtt:1883), empty: do not wait for it
 #   NES_ALSA_DEVICE           the worker's capture device; with a card in it (plughw:CARD=K66,DEV=0 or hw:2,0) the
 #                             script waits for that card before starting the queries, and starts them again when the
@@ -31,7 +32,9 @@ set -uo pipefail
 
 nes_cli=${NES_CLI:-nes-cli}
 topology=${NES_DEMO_TOPOLOGY:-topology.yaml}
-worker=${NES_WORKER_ADDRESS:-localhost:8080}
+# The `- host:` entries are the workers; the hosts of the physical sources have no dash.
+workers=${NES_WORKER_ADDRESS:-$(sed -n 's/^ *- host: *//p' "$topology")}
+workers=$(echo ${workers:-localhost:8080})
 mqtt=${NES_DEMO_MQTT_ADDRESS-mqtt:1883}
 status_topic=${NES_DEMO_STATUS_TOPIC:-demo/queries}
 asound_cards=${NES_DEMO_ASOUND_CARDS:-/run/host-asound/cards}
@@ -50,7 +53,9 @@ cli() { "$nes_cli" -t "$topology" "$@"; }
 # A plain sleep would delay the signal handlers until it ends.
 nap() { sleep "$1" & wait $!; }
 
-worker_healthy() { /bin/grpc_health_probe -addr="$worker" -connect-timeout 2s >/dev/null 2>&1; }
+worker_healthy() {
+    for w in $workers; do /bin/grpc_health_probe -addr="$w" -connect-timeout 2s >/dev/null 2>&1 || return 1; done
+}
 # The broker accepts TCP connections (bash's /dev/tcp, in a child so that the timeout can end it).
 broker_up() { timeout 2 bash -c ": </dev/tcp/${mqtt%:*}/${mqtt##*:}" 2>/dev/null; }
 # The card is listed as " 2 [K66            ]: USB-Audio - K66".
@@ -166,16 +171,16 @@ trap cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 
-log "waiting for the worker at $worker"
+log "waiting for the workers at $workers"
 deadline=$((SECONDS + health_timeout))
 until worker_healthy; do
     if [ "$SECONDS" -ge "$deadline" ]; then
-        log "the worker did not become healthy within ${health_timeout}s"
+        log "the workers did not become healthy within ${health_timeout}s"
         exit 1
     fi
     nap 2
 done
-log "the worker is healthy"
+log "the workers are healthy"
 
 # Queries whose MQTT source or sink cannot connect fail for good, so the broker must be up before they start. compose
 # does not order the broker before this container (it is not there with --profile headless, and the Docker daemon
@@ -233,7 +238,7 @@ while true; do
         break
     fi
     if ! worker_healthy; then
-        log "the worker is gone, ending (the container restarts and starts everything again)"
+        log "a worker is gone, ending (the container restarts and starts everything again)"
         failures=$((failures + 1))
         break
     fi
