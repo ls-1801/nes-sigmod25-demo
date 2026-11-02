@@ -261,33 +261,35 @@ query:
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
 
   # ==========================================================================
-  # System metrics of the machine the worker runs on, printed by Process sources (see `physical`): CPU and temperature
-  # once a second, memory every 10 seconds. The UI plots them in the "System" tile. Timestamps are converted from milliseconds to microseconds like
+  # System metrics of each Pi (edge and hub), printed by Process sources on its worker (see `physical`): CPU and
+  # temperature once a second, memory every 10 seconds, on sink/live/<edge|hub>/system_*. The UI plots them in the
+  # "System" tile. Timestamps are converted from milliseconds to microseconds like
   # everything else that is published.
   # ==========================================================================
-  - name: system_cpu
+{% for machine, machine_host in [('edge', edge_host), ('hub', hub_host)] %}
+  - name: system_cpu_{{ machine }}
     # language=SQL
     query: |
       SELECT TIMESTAMP * UINT64(1000) AS "timestamp", CPU_PERCENT AS "cpu_percent", LOAD_1M AS "load_1m"
-      FROM system_cpu
-      INTO MQTT('sink/live/system_cpu' AS "SINK"."TOPIC",
+      FROM system_cpu_{{ machine }}
+      INTO MQTT('sink/live/{{ machine }}/system_cpu' AS "SINK"."TOPIC",
                 '{{ hub_host }}:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 0 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
   # throttled is the bit mask of `vcgencmd get_throttled` (Raspberry Pi): bits 0-3 undervoltage, frequency capped,
   # throttled, soft temperature limit right now; bits 16-19 the same since boot. 0 where vcgencmd is not available.
-  - name: system_temperature
+  - name: system_temperature_{{ machine }}
     # language=SQL
     query: |
       SELECT TIMESTAMP * UINT64(1000) AS "timestamp", TEMP_C AS "temp_c", THROTTLED AS "throttled"
-      FROM system_temperature
-      INTO MQTT('sink/live/system_temperature' AS "SINK"."TOPIC",
+      FROM system_temperature_{{ machine }}
+      INTO MQTT('sink/live/{{ machine }}/system_temperature' AS "SINK"."TOPIC",
                 '{{ hub_host }}:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 0 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
-  - name: system_memory
+  - name: system_memory_{{ machine }}
     # language=SQL
     query: |
       SELECT TIMESTAMP * UINT64(1000) AS "timestamp",
@@ -295,27 +297,27 @@ query:
              MEM_TOTAL_KB - MEM_AVAILABLE_KB AS "used_kb",
              SWAP_TOTAL_KB - SWAP_FREE_KB AS "swap_used_kb",
              WORKER_RSS_KB AS "worker_rss_kb"
-      FROM system_memory
-      INTO MQTT('sink/live/system_memory' AS "SINK"."TOPIC",
+      FROM system_memory_{{ machine }}
+      INTO MQTT('sink/live/{{ machine }}/system_memory' AS "SINK"."TOPIC",
                 '{{ hub_host }}:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 0 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
   # Network traffic of the machine in bytes per second, received and sent, summed over its interfaces (the camera's
   # GigE stream is most of it).
-  - name: system_network
+  - name: system_network_{{ machine }}
     # language=SQL
     query: |
       SELECT TIMESTAMP * UINT64(1000) AS "timestamp", RX_BYTES_PER_S AS "rx_bytes_per_s", TX_BYTES_PER_S AS "tx_bytes_per_s"
-      FROM system_network
-      INTO MQTT('sink/live/system_network' AS "SINK"."TOPIC",
+      FROM system_network_{{ machine }}
+      INTO MQTT('sink/live/{{ machine }}/system_network' AS "SINK"."TOPIC",
                 '{{ hub_host }}:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 0 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
   # Memory of the NES worker process alone: anon_kb is its heap and buffer pool, file_kb the mapped files (libraries,
   # models). rss_kb = anon_kb + file_kb + shared memory.
-  - name: worker_memory
+  - name: worker_memory_{{ machine }}
     # language=SQL
     query: |
       SELECT TIMESTAMP * UINT64(1000) AS "timestamp",
@@ -323,24 +325,25 @@ query:
              WORKER_RSS_KB AS "rss_kb",
              WORKER_RSS_ANON_KB AS "anon_kb",
              WORKER_RSS_FILE_KB AS "file_kb"
-      FROM system_memory
-      INTO MQTT('sink/live/worker_memory' AS "SINK"."TOPIC",
+      FROM system_memory_{{ machine }}
+      INTO MQTT('sink/live/{{ machine }}/worker_memory' AS "SINK"."TOPIC",
                 '{{ hub_host }}:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 0 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
-  # One message a second through the worker to the UI, whose red dot in the lower right corner flashes on each: a dot
+  # One message a second from each worker to the UI, whose red dot next to the Pi's name in the System tile flashes on each: a dot
   # that stays dark while the page still updates means no heartbeat arrives (worker, query or broker).
-  - name: heartbeat
+  - name: heartbeat_{{ machine }}
     # language=SQL
     query: |
       SELECT TIMESTAMP * UINT64(1000) AS "timestamp"
-      FROM heartbeat
-      INTO MQTT('sink/live/heartbeat' AS "SINK"."TOPIC",
+      FROM heartbeat_{{ machine }}
+      INTO MQTT('sink/live/{{ machine }}/heartbeat' AS "SINK"."TOPIC",
                 '{{ hub_host }}:8080' AS "SINK"."HOST",
                 'mqtt:1883' AS "SINK"."SERVER_URI",
                 0 AS "SINK"."QOS",
                 'JSON' AS "SINK"."OUTPUT_FORMAT")
+{% endfor %}
 
 # Scalar UDFs, compiled by Codon (python_udfs/demo_udfs.py). A UDF result is always nullable.
 functions:
@@ -498,17 +501,18 @@ logical:
     schema:
       - { name: TIMESTAMP, type: UINT64, nullable: false }
       - { name: VALUE, type: FLOAT64, nullable: false }
-  - name: system_cpu
+{% for machine, machine_host in [('edge', edge_host), ('hub', hub_host)] %}
+  - name: system_cpu_{{ machine }}
     schema:
       - { name: TIMESTAMP, type: UINT64, nullable: false }
       - { name: CPU_PERCENT, type: FLOAT64, nullable: false }
       - { name: LOAD_1M, type: FLOAT64, nullable: false }
-  - name: system_temperature
+  - name: system_temperature_{{ machine }}
     schema:
       - { name: TIMESTAMP, type: UINT64, nullable: false }
       - { name: TEMP_C, type: FLOAT64, nullable: false }
       - { name: THROTTLED, type: UINT64, nullable: false }
-  - name: system_memory
+  - name: system_memory_{{ machine }}
     schema:
       - { name: TIMESTAMP, type: UINT64, nullable: false }
       - { name: MEM_TOTAL_KB, type: UINT64, nullable: false }
@@ -518,14 +522,15 @@ logical:
       - { name: WORKER_RSS_KB, type: UINT64, nullable: false }
       - { name: WORKER_RSS_ANON_KB, type: UINT64, nullable: false }
       - { name: WORKER_RSS_FILE_KB, type: UINT64, nullable: false }
-  - name: system_network
+  - name: system_network_{{ machine }}
     schema:
       - { name: TIMESTAMP, type: UINT64, nullable: false }
       - { name: RX_BYTES_PER_S, type: UINT64, nullable: false }
       - { name: TX_BYTES_PER_S, type: UINT64, nullable: false }
-  - name: heartbeat
+  - name: heartbeat_{{ machine }}
     schema:
       - { name: TIMESTAMP, type: UINT64, nullable: false }
+{% endfor %}
 
 physical:
   - logical: video
@@ -594,8 +599,9 @@ physical:
   # The commands run inside the worker container, where /proc and /sys show the host's values. PID is the worker.
   # TIMESTAMP is in milliseconds (EPOCHREALTIME without its decimal point is microseconds).
   # CPU usage is the busy share of /proc/stat since the previous line.
-  - logical: system_cpu
-    host: {{ edge_host }}:8080
+{% for machine, machine_host in [('edge', edge_host), ('hub', hub_host)] %}
+  - logical: system_cpu_{{ machine }}
+    host: {{ machine_host }}:8080
     type: Process
     parser_config:
       type: JSON
@@ -611,8 +617,8 @@ physical:
       flush_interval_ms: 100
   # vcgencmd and /dev/vcio are passed into the worker container by compose.local.yaml on the Raspberry Pi; without
   # them THROTTLED is 0.
-  - logical: system_temperature
-    host: {{ edge_host }}:8080
+  - logical: system_temperature_{{ machine }}
+    host: {{ machine_host }}:8080
     type: Process
     parser_config:
       type: JSON
@@ -623,8 +629,8 @@ physical:
         printf '{"TIMESTAMP":%d,"TEMP_C":%d.%d,"THROTTLED":%d}\n' $((${EPOCHREALTIME/[.,]/}/1000)) $((mc/1000)) $((mc%1000/100)) $((${th:-0}))
       refresh_interval_ms: 1000
       flush_interval_ms: 100
-  - logical: system_memory
-    host: {{ edge_host }}:8080
+  - logical: system_memory_{{ machine }}
+    host: {{ machine_host }}:8080
     type: Process
     parser_config:
       type: JSON
@@ -638,8 +644,8 @@ physical:
       flush_interval_ms: 100
   # Network traffic since the previous line, over all interfaces but loopback and Docker's bridges (the worker has the
   # host's network, so /proc/net/dev lists the host's interfaces). The header lines have no "name:" and are skipped.
-  - logical: system_network
-    host: {{ edge_host }}:8080
+  - logical: system_network_{{ machine }}
+    host: {{ machine_host }}:8080
     type: Process
     parser_config:
       type: JSON
@@ -653,8 +659,8 @@ physical:
         pt=$t; pr=$r; px=$x; sleep 1; done
       refresh_interval_ms: 1000
       flush_interval_ms: 100
-  - logical: heartbeat
-    host: {{ edge_host }}:8080
+  - logical: heartbeat_{{ machine }}
+    host: {{ machine_host }}:8080
     type: Process
     parser_config:
       type: JSON
@@ -663,6 +669,7 @@ physical:
         printf '{"TIMESTAMP":%d}\n' $((${EPOCHREALTIME/[.,]/}/1000))
       refresh_interval_ms: 1000
       flush_interval_ms: 100
+{% endfor %}
 
 # Two workers: the edge Pi runs the sources (camera, microphone, MQTT sensors, system metrics) and most operators, and
 # sends the results to the hub Pi, which runs the MQTT sinks next to the broker and the UI.
