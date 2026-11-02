@@ -79,7 +79,9 @@
         owner: pi
         group: pi
         mode: preserve
-      loop: [compose.yaml, compose.local.yaml, run-demo.sh, queries.sh, asound.conf, mosquitto.conf, python_udfs, models, generators]
+      # The broker, the generators and the queries service only run on the hub.
+      loop: "{{ ['compose.yaml', 'compose.local.yaml', 'run-demo.sh', 'asound.conf', 'python_udfs', 'models']
+                + (['queries.sh', 'mosquitto.conf', 'generators'] if 'hub' in group_names else []) }}"
     - name: Per-Pi settings (.env)
       ansible.builtin.template:
         src: templates/env.j2
