@@ -1,4 +1,4 @@
-# This machine only: worker and CLI images from the registry on the build machine. The other images are local.
+# This machine only: worker, CLI and UI images from the registry on the build machine. The other images are local.
 services:
   worker:
     image: 192.168.1.99:5000/nes-worker:${NES_DOCKER_TAG:-local}
@@ -11,3 +11,5 @@ services:
     image: 192.168.1.99:5000/nes-worker:${NES_DOCKER_TAG:-local}
   queries:
     image: 192.168.1.99:5000/nes-cli:${NES_DOCKER_TAG:-local}
+  webui:
+    image: 192.168.1.99:5000/sigmod-ui:${NES_DOCKER_TAG:-local}

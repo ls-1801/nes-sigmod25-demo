@@ -5,7 +5,7 @@
 #
 #   ./run-demo.sh            wait for the microphone, then start everything in the background
 #   ./run-demo.sh up <args>  the same with more `docker compose up` options, e.g. `--pull always` for new images
-#   ./run-demo.sh pull       fetch new worker and CLI images
+#   ./run-demo.sh pull       fetch new worker, CLI and UI images
 #   ./run-demo.sh <args>     any other docker compose command, e.g. `stop`, `ps`, `logs -f queries`
 cd "$(dirname "$0")" || exit 1
 # Per device settings (topology, microphone) are in .env.
@@ -23,6 +23,6 @@ case ${1:-up} in
             sleep 2
         done
         exec docker compose up -d "$@" ;;
-    pull) exec docker compose pull worker queries ;;
+    pull) exec docker compose pull worker queries webui ;;
     *) exec docker compose "$@" ;;
 esac
