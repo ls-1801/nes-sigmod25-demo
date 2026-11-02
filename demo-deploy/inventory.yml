@@ -3,7 +3,7 @@ all:
   vars:
     ansible_user: pi
     registry: 192.168.1.99:5000          # build machine; the Pis pull over plain http (publish-images.sh pushes there)
-    demo_tag: demo-rebase-10-29-2026     # tag of nes-worker, nes-cli, sigmod-ui, sigmod-patient-monitor, sigmod-lab-values
+    demo_tag: demo-rebase-10-29-2026-asan     # tag of nes-worker, nes-cli, sigmod-ui, sigmod-patient-monitor, sigmod-lab-values
     ntp_server: 192.168.1.99             # both Pis sync their clocks to it (the UI compares the hub's clock with the edge's timestamps)
   children:
     hub:        # MQTT broker, web UI + kiosk, generators, queries service, worker with the MQTT sinks
