@@ -30,6 +30,8 @@ x-mqtt-host: &mqtt-host
 services:
   worker:
     image: ${NES_IMAGE_REPO:-nebulastream}/nes-worker:${NES_DOCKER_TAG:-local}
+    # The image's default user cannot write the bind-mounted repository (UDF venv, Codon cache, traces) or open the devices.
+    user: root
     network_mode: host
     # The latency trace names threads by their kernel thread ids, which the OS scheduling trace (latency_sched.sh) matches.
     pid: host
@@ -86,6 +88,8 @@ services:
   # container has no worker binary).
   udf-venv:
     image: ${NES_IMAGE_REPO:-nebulastream}/nes-worker:${NES_DOCKER_TAG:-local}
+    # The image's default user cannot write the bind-mounted repository (UDF venv, Codon cache, traces) or open the devices.
+    user: root
     network_mode: host
     working_dir: /nebulastream
     volumes:
@@ -103,6 +107,8 @@ services:
   # happens before the worker stops because it depends on it. A failed run (worker lost) restarts the container.
   queries:
     image: ${NES_IMAGE_REPO:-nebulastream}/nes-cli:${NES_DOCKER_TAG:-local}
+    # The image's default user cannot write the bind-mounted repository (UDF venv, Codon cache, traces) or open the devices.
+    user: root
     network_mode: host
     extra_hosts: *mqtt-host
     working_dir: /nebulastream

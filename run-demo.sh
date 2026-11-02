@@ -11,7 +11,7 @@ cd "$(dirname "$0")" || exit 1
 # Per device settings (topology, microphone) are in .env.
 set -a; . ./.env; set +a
 MICROPHONE=${MICROPHONE-K66} # ALSA card name, see /proc/asound/cards; empty on a device without the microphone
-export NES_DOCKER_TAG=demo-rebase-10-2-2026 NES_ALSA_DEVICE=plughw:CARD=$MICROPHONE,DEV=0 NES_AUDIO_GID=29
+export NES_DOCKER_TAG=demo-rebase-10-29-2026 NES_ALSA_DEVICE=plughw:CARD=$MICROPHONE,DEV=0 NES_AUDIO_GID=29
 export COMPOSE_FILE=compose.yaml:compose.local.yaml
 case ${1:-up} in
     up)
